@@ -41,6 +41,11 @@ build/
 dist/
 *.egg-info/
 
+# Local handoff and reference artifacts
+CODEX_HANDOFF.md
+samples/desired_output_example.docx
+samples/punctuation_fallback_example.txt
+
 # Operating-system and editor files
 .DS_Store
 Thumbs.db
