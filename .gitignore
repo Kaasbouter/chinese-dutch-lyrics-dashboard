@@ -1,0 +1,52 @@
+# Python environments
+.venv/
+venv/
+env/
+
+# Python and test caches
+__pycache__/
+**/__pycache__/
+.pytest_cache/
+*.pyc
+*.pyo
+*.pyd
+.coverage
+htmlcov/
+
+# Streamlit local-only state
+.streamlit/secrets.toml
+.streamlit/credentials.toml
+.streamlit/*.log
+.streamlit/*.pid
+.env
+.env.*
+!.env.example
+
+# Temporary uploads and generated output
+uploads/
+temp/
+tmp/
+output/
+outputs/
+exports/
+*_formatted.txt
+converted_lyrics*.txt
+samples/generated_output.txt
+*.tmp
+*.temp
+
+# Local packaging/build artifacts
+shareable-release/
+build/
+dist/
+*.egg-info/
+
+# Operating-system and editor files
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
+*~

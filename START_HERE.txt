@@ -1,0 +1,35 @@
+CHINESE-DUTCH LYRICS CONVERTER
+================================
+
+This folder contains the complete free manual dashboard.
+It does not use an AI API, API key, paid service, or subscription.
+
+WINDOWS
+-------
+1. Extract the complete ZIP before running anything.
+2. Install Python 3.10 or newer from:
+   https://www.python.org/downloads/
+   Enable "Add Python to PATH" during installation.
+3. Double-click start_dashboard.bat.
+4. On the first run, allow a few minutes for the free Python packages to install.
+5. The dashboard opens at http://127.0.0.1:8501/
+6. Keep the command window open while using the dashboard.
+7. Close that window or press Ctrl+C when finished.
+
+MACOS OR LINUX
+--------------
+1. Extract the complete ZIP.
+2. Install Python 3.10 or newer.
+3. Open a terminal in this folder.
+4. Run:
+      sh start_dashboard.sh
+5. Open http://127.0.0.1:8501/ if the browser does not open automatically.
+6. Keep the terminal open; press Ctrl+C to stop.
+
+NOTES
+-----
+- The first setup requires internet access to download the free dependencies.
+- After successful setup, later launches can run without internet access.
+- The website and uploaded lyric processing run locally on that device.
+- Do not move individual files out of this folder; share or copy the complete folder.
+- See README.md for the converter workflow, supported files, and test instructions.
