@@ -1,6 +1,6 @@
 # Free Manual Chinese–Dutch Lyrics Converter
 
-A completely free local Streamlit dashboard that converts a basic-format bilingual lyric document into the required UTF-8 TXT structure.
+A completely free local Streamlit dashboard that converts basic-format bilingual or single-language lyric documents into the required UTF-8 TXT structure.
 
 ## No paid services
 
@@ -11,24 +11,32 @@ This version does not use:
 - cloud AI;
 - subscriptions or usage-based services.
 
-Everything runs locally on the computer. The user manually confirms which Chinese and Dutch sections and line ranges are translations of each other.
+Everything runs locally on the computer. For bilingual songs, the user manually confirms which Chinese and Dutch sections and line ranges are translations of each other. Single-language songs skip translation matching.
 
 Chinese word segmentation uses the free MIT-licensed `jieba` package in its standard offline mode. No lyric text is sent to an API or external service.
 
 ## Dashboard workflow
 
 1. Upload a supported source file.
-2. Review the detected Chinese and Dutch sections.
-3. Select the true Dutch translation section or sections for each Chinese section.
-4. Review the side-by-side numbered Chinese and Dutch reference panels, edit the Chinese range rows when needed, and drag the Dutch cards into the matching row boxes.
-5. Validate that every Chinese and Dutch line is covered reciprocally.
-6. Choose where the output changes from `Chinese|Dutch` to `Dutch|Chinese`.
-7. Remove punctuation from title/lyric content and normalize whitespace.
-8. Apply the language-order switch to determine which language is before and after `|`.
-9. Calculate cleaned lengths with the stricter first-side limit and add at most one word-safe `//` per language when needed.
-10. Add the generated `[Section]`, `|`, and `//` formatting.
-11. Preview and edit the final result.
-12. Download a UTF-8 `.txt` file.
+2. Review the detected sections and automatic bilingual or single-language mode.
+3. For bilingual songs, select the true Dutch translation section or sections for each Chinese section.
+4. For bilingual songs, review the numbered reference panels, edit Chinese ranges, drag Dutch cards into the matching rows, and validate reciprocal coverage.
+5. For bilingual songs, choose where the output changes from `Chinese|Dutch` to `Dutch|Chinese`.
+6. Remove punctuation from title/lyric content and normalize whitespace.
+7. Apply the existing positional length limits and add at most one word-safe `//` per language when needed.
+8. Add structural section headings and, only for bilingual songs, `|`.
+9. Preview and edit the final result.
+10. Download a UTF-8 `.txt` file.
+
+## Single-language songs
+
+Chinese-only, Dutch-only, English-only, and other Latin-script lyric files are supported. The parser accepts single-language mode only when the title and every lyric line are consistent with the one detected script; opposite or unsupported script evidence and bilingual `|` markers are rejected instead of being silently treated as a failed bilingual parse.
+
+- Manual section matching, manual line matching, reciprocal mapping validation, and the language-order switch are skipped.
+- Sections and lyric lines keep their uploaded order.
+- Output contains only the detected language and never generates `|` or an empty language placeholder.
+- The sole language is treated as the first output side, so every lyric line uses the existing stricter `max(4, floor(normal limit × 0.80))` threshold and the existing first-side minimum-fragment rules.
+- Punctuation removal, whitespace normalization, the one-`//` limit, Latin whitespace/article protection, Chinese `jieba` protection, fallback warnings, editable preview, and UTF-8 TXT download remain active.
 
 ## Unequal song structures
 
@@ -69,15 +77,15 @@ The document must use recognizable headings such as `Verse 1`, `Chorus 1`, `Brid
 ## Output rules
 
 - Section names are surrounded by square brackets.
-- The two languages are separated by `|`.
+- Bilingual output separates the two languages with `|`; single-language output never generates `|`.
 - Before the selected switch point, output is `Chinese|Dutch`.
 - From the selected switch point onward, output is `Dutch|Chinese`.
 - The configured Chinese and Dutch limits are the normal limits used after `|`. Their defaults are 10 Chinese characters and 40 Dutch characters.
-- The language before `|` uses `max(4, floor(normal limit × 0.80))`. With the defaults, that is 8 Chinese characters or 32 Dutch characters; the language after `|` remains at 10 or 40 respectively.
+- The language before `|` uses `max(4, floor(normal limit × 0.80))`. With the defaults, that is 8 Chinese characters or 32 Dutch characters; the language after `|` remains at 10 or 40 respectively. A single-language lyric is always processed with that same stricter first-side limit despite having no `|`.
 - All Unicode punctuation is removed from title and lyric content before length checks. This includes Western and Chinese commas, stops, quotes, brackets, dashes, ellipses, and other Unicode punctuation categories.
 - Whitespace left after cleaning is trimmed and collapsed without joining Dutch words.
 - Separator spaces created only to keep punctuation-separated words apart are not split candidates; former punctuation locations never determine a `//` position.
-- Generated structural markers such as `[Title]`, `[Verse 1]`, `|`, and `//` are added after cleaning and remain intact.
+- Generated structural markers such as `[Title]`, `[Verse 1]`, bilingual `|`, and `//` are added after cleaning and remain intact.
 - A cleaned lyric receives no `//` when it is within the applicable first- or second-side limit.
 - First-side safe boundaries are accepted only when both fragments contain at least two characters and at least 25% of the cleaned text. This prevents the lower limit from creating tiny fragments. Dutch remains unsplit when no acceptable word-safe boundary exists; Chinese retains its existing warned character fallback.
 - A long Chinese lyric is divided at the closest balanced `jieba` word boundary.
@@ -86,7 +94,7 @@ The document must use recognizable headings such as `Verse 1`, `Chorus 1`, `Brid
 - A long Dutch or English lyric is divided only at the closest balanced whitespace boundary, never inside a word. A middle-sentence standalone Dutch article (`de`, `het`, or `een`) or English article (`a`, `an`, or `the`) stays with the word immediately following it; sentence-initial articles keep the existing behavior.
 - Each language receives at most one `//` per output row, even when the text is extremely long.
 - Apart from the required punctuation removal and whitespace normalization, lyric characters and words are never translated, rewritten, deleted, duplicated, or reordered.
-- Export is blocked until all detected sections and lines have valid reciprocal mappings.
+- Bilingual export is blocked until all detected sections and lines have valid reciprocal mappings. Single-language mode does not require mappings.
 - The final preview remains editable before download.
 
 ## Run on Windows

@@ -155,17 +155,18 @@ st.set_page_config(page_title="Chinese–Dutch Lyrics Converter", page_icon="�
 
 st.title("Chinese–Dutch Lyrics Converter")
 st.caption(
-    "A completely free, local manual dashboard. Upload the lyrics, confirm the true Chinese–Dutch matches, choose the language-order switch, and download a UTF-8 TXT file."
+    "A completely free local dashboard. Single-language songs convert directly; for bilingual "
+    "songs, confirm the true Chinese–Dutch matches and language order before downloading UTF-8 TXT."
 )
 
 with st.expander("Expected input format", expanded=False):
     st.markdown(
         """
 - A title at the top.
-- One complete block of Chinese lyric sections and one complete block of Dutch lyric sections.
+- Either one single-language set of lyric sections, or one complete Chinese block and one complete Dutch block.
 - Section headings such as `Verse 1`, `Chorus 1`, `Bridge`, or `Refrein 1`.
-- The Chinese and Dutch blocks may have **different numbers of sections or lyric lines**.
-- You manually confirm which sections and exact line ranges are translations of each other.
+- Bilingual blocks may have **different numbers of sections or lyric lines**.
+- For bilingual songs, you manually confirm which sections and exact line ranges are translations of each other.
 - No API key, subscription, cloud AI, or paid service is used.
         """
     )
@@ -214,6 +215,15 @@ for warning in parsed.warnings:
 
 chinese_sections = [section for section in parsed.sections if section.language == "zh"]
 dutch_sections = [section for section in parsed.sections if section.language == "nl"]
+single_language_mode = parsed.mode == "single-language"
+detected_language_label = (
+    "Chinese"
+    if parsed.single_language == "zh"
+    else "Dutch/English or Latin-script language"
+)
+if single_language_mode:
+    st.success(f"Single-language song detected — {detected_language_label}.")
+
 section_to_code = {
     section.original_index: f"D{position}"
     for position, section in enumerate(dutch_sections, start=1)
@@ -223,7 +233,15 @@ section_rows = [
     {
         "Index": section.original_index,
         "Section": f"[{section.label}]",
-        "Language": "Chinese" if section.language == "zh" else "Dutch",
+        "Language": (
+            "Chinese"
+            if section.language == "zh"
+            else (
+                "Dutch/English or Latin script"
+                if single_language_mode
+                else "Dutch"
+            )
+        ),
         "Lines": len(section.lines),
         "Opening text": section.lines[0],
     }
@@ -231,6 +249,96 @@ section_rows = [
 ]
 with st.expander("Detected source sections", expanded=False):
     st.dataframe(pd.DataFrame(section_rows), width="stretch", hide_index=True)
+
+if single_language_mode:
+    st.subheader("2. Configure single-language splitting")
+    with st.expander("Splitting rules", expanded=False):
+        if parsed.single_language == "zh":
+            chinese_max = st.number_input(
+                "Maximum Chinese characters per segment",
+                min_value=4,
+                max_value=40,
+                value=10,
+                step=1,
+            )
+            dutch_max = 40
+            normal_limit = int(chinese_max)
+        else:
+            chinese_max = 10
+            dutch_max = st.number_input(
+                "Maximum Latin-script characters per segment",
+                min_value=10,
+                max_value=100,
+                value=40,
+                step=1,
+            )
+            normal_limit = int(dutch_max)
+        st.caption(
+            "Punctuation is removed before measuring. The sole language is treated as the "
+            "first output side and therefore uses the existing stricter 80% limit, even "
+            "though no `|` is generated. Existing word-safe, article-protection, Chinese "
+            "segmentation, balance, and minimum-fragment rules remain active. Current "
+            f"normal/sole-language limits: {normal_limit}/"
+            f"{derive_first_side_limit(normal_limit)}."
+        )
+
+    settings = ConversionSettings(
+        chinese_max_length=int(chinese_max),
+        dutch_max_length=int(dutch_max),
+    )
+    conversion_warnings: list[str] = []
+    try:
+        generated = convert_lyrics(
+            parsed,
+            None,
+            settings,
+            warnings=conversion_warnings,
+        )
+    except LyricsDashboardError as exc:
+        st.error(str(exc))
+        st.stop()
+
+    for warning in conversion_warnings:
+        st.warning(warning)
+
+    control_signature = (
+        fingerprint,
+        parsed.mode,
+        parsed.single_language,
+        int(chinese_max),
+        int(dutch_max),
+    )
+    if st.session_state.get("control_signature") != control_signature:
+        st.session_state["control_signature"] = control_signature
+        st.session_state["edited_output"] = generated
+
+    st.subheader("3. Preview and download the TXT")
+    st.caption(
+        "The preview is editable. Check all `//` placements before downloading."
+    )
+    final_text = st.text_area(
+        "Converted lyrics",
+        key="edited_output",
+        height=560,
+        label_visibility="collapsed",
+    )
+
+    safe_stem = re.sub(
+        r"[^\w\-]+",
+        "_",
+        Path(uploaded_file.name).stem,
+        flags=re.UNICODE,
+    ).strip("_")
+    output_name = f"{safe_stem or 'converted_lyrics'}_formatted.txt"
+    st.download_button(
+        "Download final TXT",
+        data=encode_utf8_txt(final_text),
+        file_name=output_name,
+        mime="text/plain; charset=utf-8",
+        type="primary",
+        width="stretch",
+    )
+    st.stop()
 
 st.subheader("2. Match each Chinese section to its Dutch translation")
 st.info(

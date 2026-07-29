@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import io
 from pathlib import Path
 
@@ -117,6 +118,19 @@ def test_converter_switches_order_at_selected_original_section() -> None:
     assert "|Groot is Uw trouw" in first_verse.splitlines()[0]
     assert dutch_verse.splitlines()[0].startswith("Groot is Uw trouw")
     assert "|祢信實" in dutch_verse.splitlines()[0]
+
+
+def test_representative_bilingual_output_remains_byte_for_byte_unchanged() -> None:
+    parsed = parse_lyrics(SOURCE)
+    output = convert_lyrics(
+        parsed,
+        _exact_plan(parsed),
+        ConversionSettings(switch_index=3, chinese_max_length=10, dutch_max_length=40),
+    )
+
+    assert hashlib.sha256(output.encode("utf-8")).hexdigest() == (
+        "fadb1dfc2dba342677582a927c809382cdd79f4c495d79bccc3fd917b11ce1c6"
+    )
 
 
 def test_manual_alignment_requires_each_dutch_section_to_be_covered() -> None:

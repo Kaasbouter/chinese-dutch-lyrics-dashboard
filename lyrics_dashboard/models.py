@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 Language = Literal["zh", "nl", "unknown"]
+ConversionMode = Literal["bilingual", "single-language"]
 Confidence = Literal["manual"]
 
 
@@ -24,6 +25,21 @@ class ParsedLyrics:
     dutch_title: str
     sections: tuple[Section, ...]
     warnings: tuple[str, ...] = ()
+    mode: ConversionMode = "bilingual"
+
+    @property
+    def single_language(self) -> Language | None:
+        """Return the parser-approved sole language, when applicable."""
+        if self.mode != "single-language":
+            return None
+        languages = {
+            section.language
+            for section in self.sections
+            if section.language != "unknown"
+        }
+        if len(languages) != 1:
+            return None
+        return next(iter(languages))
 
 
 @dataclass(frozen=True)

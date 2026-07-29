@@ -1,12 +1,57 @@
 from __future__ import annotations
 
 import re
+import unicodedata
+from collections.abc import Callable
 
 from .errors import PairingError, ParseError
 from .models import Language, ParsedLyrics, Section
 
-CJK_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
-LATIN_RE = re.compile(r"[A-Za-zÀ-ÖØ-öø-ÿ]")
+
+def _is_cjk_character(character: str) -> bool:
+    codepoint = ord(character)
+    return (
+        0x3400 <= codepoint <= 0x4DBF
+        or 0x4E00 <= codepoint <= 0x9FFF
+        or 0xF900 <= codepoint <= 0xFAFF
+        or 0x20000 <= codepoint <= 0x2FA1F
+    )
+
+
+def _is_latin_letter(character: str) -> bool:
+    return (
+        unicodedata.category(character).startswith("L")
+        and unicodedata.name(character, "").startswith("LATIN ")
+    )
+
+
+def _script_counts(text: str) -> tuple[int, int]:
+    return (
+        sum(_is_cjk_character(character) for character in text),
+        sum(_is_latin_letter(character) for character in text),
+    )
+
+
+def _first_character_index(
+    text: str,
+    predicate: Callable[[str], bool],
+) -> int | None:
+    return next(
+        (index for index, character in enumerate(text) if predicate(character)),
+        None,
+    )
+
+
+def _contains_unexpected_letter(text: str, language: Language) -> bool:
+    for character in text:
+        if not unicodedata.category(character).startswith("L"):
+            continue
+        if language == "zh" and not _is_cjk_character(character):
+            return True
+        if language == "nl" and not _is_latin_letter(character):
+            return True
+    return False
+
 
 _KIND_ALIASES = {
     "title": "Title",
@@ -58,8 +103,7 @@ def _display_label(kind: str, number: int | None) -> str:
 
 
 def detect_language(text: str) -> Language:
-    cjk = len(CJK_RE.findall(text))
-    latin = len(LATIN_RE.findall(text))
+    cjk, latin = _script_counts(text)
     if cjk == 0 and latin == 0:
         return "unknown"
     if cjk >= max(2, latin * 1.2):
@@ -93,15 +137,15 @@ def _split_title(title_lines: list[str]) -> tuple[str, str, str]:
         if chinese_line and dutch_line:
             return raw_title, chinese_line, dutch_line
 
-    first_latin = LATIN_RE.search(raw_title)
-    first_cjk = CJK_RE.search(raw_title)
-    if first_latin and first_cjk:
-        if first_cjk.start() < first_latin.start():
-            chinese = raw_title[: first_latin.start()].strip(" -–—|,;")
-            dutch = raw_title[first_latin.start() :].strip(" -–—|,;")
+    first_latin = _first_character_index(raw_title, _is_latin_letter)
+    first_cjk = _first_character_index(raw_title, _is_cjk_character)
+    if first_latin is not None and first_cjk is not None:
+        if first_cjk < first_latin:
+            chinese = raw_title[:first_latin].strip(" -–—|,;")
+            dutch = raw_title[first_latin:].strip(" -–—|,;")
         else:
-            dutch = raw_title[: first_cjk.start()].strip(" -–—|,;")
-            chinese = raw_title[first_cjk.start() :].strip(" -–—|,;")
+            dutch = raw_title[:first_cjk].strip(" -–—|,;")
+            chinese = raw_title[first_cjk:].strip(" -–—|,;")
         return raw_title, chinese, dutch
 
     language = detect_language(raw_title)
@@ -128,8 +172,41 @@ def _validate_language_blocks(sections: list[Section]) -> list[str]:
     return warnings
 
 
+def _validate_single_language_candidate(
+    sections: list[Section],
+    raw_title: str,
+    language: Language,
+) -> None:
+    """Reject bilingual evidence hidden inside an apparent one-language block."""
+    for section in sections:
+        for line_number, line in enumerate(section.lines, start=1):
+            if "|" in line:
+                raise PairingError(
+                    f"[{section.label}] line {line_number} contains `|`, which signals "
+                    "bilingual structure and is not valid in single-language mode."
+                )
+            if _contains_unexpected_letter(line, language):
+                raise PairingError(
+                    f"[{section.label}] line {line_number} contains evidence of a second "
+                    "or unsupported language, but only one language block was detected. "
+                    "Separate bilingual lyrics into headed sections instead of using "
+                    "single-language mode."
+                )
+
+    if "|" in raw_title:
+        raise PairingError(
+            "The title contains bilingual evidence (`|`), but only one lyric language block "
+            "was detected. Check that the second language has recognizable section headings."
+        )
+    if _contains_unexpected_letter(raw_title, language):
+        raise PairingError(
+            "The title contains bilingual evidence, but only one lyric language block was "
+            "detected. Check that the second language has recognizable section headings."
+        )
+
+
 def parse_lyrics(text: str) -> ParsedLyrics:
-    """Parse a basic-format bilingual lyric document without assuming equal counts."""
+    """Parse a basic-format bilingual or single-language lyric document."""
     lines = [_clean_line(line) for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
     if not any(lines):
         raise ParseError("The source text is empty.")
@@ -211,13 +288,17 @@ def parse_lyrics(text: str) -> ParsedLyrics:
     unknown = [section.label for section in sections if section.language == "unknown"]
     if unknown:
         raise PairingError(f"Could not detect a language for: {', '.join(unknown)}.")
-    if not any(section.language == "zh" for section in sections):
-        raise PairingError("The file does not contain a detected Chinese lyric section.")
-    if not any(section.language == "nl" for section in sections):
-        raise PairingError("The file does not contain a detected Dutch lyric section.")
 
     raw_title, chinese_title, dutch_title = _split_title(title_lines)
-    warnings = _validate_language_blocks(sections)
+    detected_languages = {section.language for section in sections}
+    if len(detected_languages) == 1:
+        single_language = next(iter(detected_languages))
+        _validate_single_language_candidate(sections, raw_title, single_language)
+        mode = "single-language"
+        warnings: list[str] = []
+    else:
+        mode = "bilingual"
+        warnings = _validate_language_blocks(sections)
 
     return ParsedLyrics(
         raw_title=raw_title,
@@ -225,4 +306,5 @@ def parse_lyrics(text: str) -> ParsedLyrics:
         dutch_title=dutch_title,
         sections=tuple(sections),
         warnings=tuple(warnings),
+        mode=mode,
     )

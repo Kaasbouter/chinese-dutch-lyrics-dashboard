@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .alignment import validate_alignment_plan
+from .errors import PairingError
 from .models import AlignmentPlan, ParsedLyrics, Section
 from .splitter import MINIMUM_SPLIT_LIMIT, split_lyric_result
 from .text_processing import clean_content_text
@@ -14,7 +15,7 @@ MINIMUM_FIRST_SIDE_FRAGMENT_LENGTH = 2
 
 @dataclass(frozen=True)
 class ConversionSettings:
-    switch_index: int | None
+    switch_index: int | None = None
     chinese_max_length: int = 10
     dutch_max_length: int = 40
     include_title: bool = True
@@ -22,7 +23,7 @@ class ConversionSettings:
 
 
 def derive_first_side_limit(normal_limit: int) -> int:
-    """Return the stricter positional limit used before the output ``|``."""
+    """Return the stricter limit used for the first or sole output side."""
     if normal_limit < MINIMUM_SPLIT_LIMIT:
         raise ValueError("Normal maximum length must be at least 4.")
     return max(
@@ -39,6 +40,15 @@ def encode_utf8_txt(text: str) -> bytes:
 def _format_title(parsed: ParsedLyrics, separator: str) -> list[str]:
     if not parsed.raw_title and not parsed.chinese_title and not parsed.dutch_title:
         return []
+    if parsed.mode == "single-language":
+        language = parsed.single_language
+        if language not in ("zh", "nl"):
+            raise PairingError("Single-language conversion needs one detected lyric language.")
+        title_source = (
+            parsed.chinese_title if language == "zh" else parsed.dutch_title
+        ) or parsed.raw_title
+        title = clean_content_text(title_source, language)
+        return ["[Title]", title, ""] if title else []
     if parsed.chinese_title and parsed.dutch_title:
         chinese_title = clean_content_text(parsed.chinese_title, "zh")
         dutch_title = clean_content_text(parsed.dutch_title, "nl")
@@ -71,14 +81,63 @@ def _join_translation_lines(parsed: ParsedLyrics, references) -> str:
     return outer_separator.join(piece.strip() for piece in pieces if piece.strip()).strip()
 
 
+def _convert_single_language(
+    parsed: ParsedLyrics,
+    settings: ConversionSettings,
+    warnings: list[str] | None,
+) -> str:
+    language = parsed.single_language
+    if language not in ("zh", "nl"):
+        raise PairingError("Single-language conversion needs one detected lyric language.")
+
+    normal_limit = (
+        settings.chinese_max_length if language == "zh" else settings.dutch_max_length
+    )
+    first_side_limit = derive_first_side_limit(normal_limit)
+    output: list[str] = []
+    if settings.include_title:
+        output.extend(_format_title(parsed, settings.title_separator))
+
+    for section in parsed.sections:
+        if section.language != language:
+            raise PairingError(
+                "Single-language conversion cannot contain sections in another language."
+            )
+        output.append(f"[{section.label}]")
+        for row_number, source_text in enumerate(section.lines, start=1):
+            result = split_lyric_result(
+                source_text,
+                language,
+                first_side_limit,
+                minimum_fragment_length=MINIMUM_FIRST_SIDE_FRAGMENT_LENGTH,
+                minimum_fragment_ratio=FIRST_SIDE_MINIMUM_FRAGMENT_RATIO,
+            )
+            if result.used_character_fallback and warnings is not None:
+                warning = (
+                    f"[{section.label}] output row {row_number}: the local Chinese word "
+                    "segmenter found no safe word or whitespace boundary, so a last-resort "
+                    "character split was used. Review this `//` in the editable preview."
+                )
+                if warning not in warnings:
+                    warnings.append(warning)
+            output.append(result.text)
+        output.append("")
+
+    return "\n".join(output).rstrip() + "\n"
+
+
 def convert_lyrics(
     parsed: ParsedLyrics,
-    alignment_plan: AlignmentPlan,
+    alignment_plan: AlignmentPlan | None,
     settings: ConversionSettings,
     *,
     warnings: list[str] | None = None,
 ) -> str:
-    """Create the final UTF-8 TXT body from validated semantic/manual matches."""
+    """Create TXT from parser-approved single lyrics or validated bilingual matches."""
+    if parsed.mode == "single-language":
+        return _convert_single_language(parsed, settings, warnings)
+    if alignment_plan is None:
+        raise PairingError("Bilingual conversion requires a validated alignment plan.")
     if settings.switch_index is not None and not 0 <= settings.switch_index < len(parsed.sections):
         raise ValueError("switch_index is outside the detected section range.")
     validate_alignment_plan(parsed, alignment_plan)

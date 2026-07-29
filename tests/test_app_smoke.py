@@ -201,3 +201,61 @@ def test_dashboard_shows_non_blocking_chinese_character_fallback_warning() -> No
         for warning in app.warning
     )
     assert len(app.get("download_button")) == 1
+
+
+def test_single_language_dashboard_skips_bilingual_controls_and_exports_preview() -> None:
+    source = (
+        "[Title]\n"
+        "Grace\n\n"
+        "Verse 1\n"
+        "We sing together for the Lord\n\n"
+        "Chorus 1\n"
+        "A short song\n"
+    )
+    app = AppTest.from_file(str(APP_PATH), default_timeout=10).run()
+    app.file_uploader[0].set_value(
+        ("english-only.txt", source.encode("utf-8"), "text/plain")
+    ).run(timeout=10)
+
+    assert not app.exception
+    assert not app.error
+    assert any(
+        message.value
+        == "Single-language song detected \u2014 Dutch/English or Latin-script language."
+        for message in app.success
+    )
+    assert not any(
+        button.label == "Validate these manual matches" for button in app.button
+    )
+    assert not app.multiselect
+    assert not app.get("component_instance")
+    assert not any(
+        selectbox.label == "Switch to Dutch first starting at"
+        for selectbox in app.selectbox
+    )
+    assert not any(
+        subheader.value.startswith(
+            (
+                "2. Match",
+                "3. Confirm",
+                "4. Choose",
+            )
+        )
+        for subheader in app.subheader
+    )
+
+    assert len(app.text_area) == 1
+    preview_text = app.text_area[0].value
+    assert "|" not in preview_text
+    assert preview_text == app.session_state["edited_output"]
+    assert encode_utf8_txt(preview_text).decode("utf-8") == preview_text
+
+    edited_preview = preview_text.replace("A short song", "A revised song")
+    app.text_area[0].set_value(edited_preview).run(timeout=10)
+    assert app.text_area[0].value == edited_preview
+    assert app.session_state["edited_output"] == edited_preview
+    assert encode_utf8_txt(app.text_area[0].value).decode("utf-8") == edited_preview
+
+    download_buttons = app.get("download_button")
+    assert len(download_buttons) == 1
+    assert download_buttons[0].label == "Download final TXT"
