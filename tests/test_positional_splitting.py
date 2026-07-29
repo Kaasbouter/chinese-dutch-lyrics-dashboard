@@ -149,3 +149,28 @@ def test_short_first_side_and_unbalanced_dutch_boundary_remain_unsplit() -> None
         f"{dutch}|\u77ed\u6b4c",
     ]
     assert "//" not in rows[1]
+
+
+def test_protected_boundaries_work_on_both_sides_after_language_switch() -> None:
+    chinese = "\u8cdc\u6211\u6c38\u5e73\u5b89\u76f4\u5230\u6c38\u9060"
+    dutch = "dit is een nieuw lied"
+    parsed, plan = _single_pair(chinese, dutch)
+
+    output = convert_lyrics(
+        parsed,
+        plan,
+        ConversionSettings(
+            switch_index=1,
+            chinese_max_length=8,
+            dutch_max_length=8,
+        ),
+    )
+    rows = _lyric_rows(output)
+
+    assert rows == [
+        "\u8cdc\u6211\u6c38\u5e73\u5b89//\u76f4\u5230\u6c38\u9060|"
+        "dit is//een nieuw lied",
+        "dit is//een nieuw lied|"
+        "\u8cdc\u6211\u6c38\u5e73\u5b89//\u76f4\u5230\u6c38\u9060",
+    ]
+    assert all(side.count("//") <= 1 for row in rows for side in row.split("|"))

@@ -322,5 +322,157 @@ def test_splitting_loses_reorders_or_rewrites_no_cleaned_content(
     assert dutch_result.replace("//", " ").split() == dutch_cleaned.split()
 
 
+@pytest.mark.parametrize(
+    "article",
+    (
+        "de",
+        "het",
+        "een",
+        "a",
+        "an",
+        "the",
+        "De",
+        "HET",
+        "Een",
+        "The",
+        "AN",
+        "A",
+    ),
+)
+def test_middle_dutch_and_english_articles_stay_with_the_following_word(
+    article: str,
+) -> None:
+    assert (
+        split_lyric(f"dit is {article} nieuw lied", "nl", 8)
+        == f"dit is//{article} nieuw lied"
+    )
+
+
+def test_boundaries_before_an_article_and_after_its_follower_remain_allowed() -> None:
+    assert split_lyric("ik kom tot de Heer", "nl", 10) == "ik kom tot//de Heer"
+    assert (
+        split_lyric("ik kom tot de Heer om Hem te aanbidden", "nl", 10)
+        == "ik kom tot de Heer//om Hem te aanbidden"
+    )
+
+
+def test_sentence_initial_articles_and_partial_matches_keep_existing_behavior() -> None:
+    assert split_lyric("The Lord", "nl", 4) == "The//Lord"
+    assert (
+        split_lyric("dit theater is mooi", "nl", 4)
+        == "dit theater//is mooi"
+    )
+
+
+def test_text_remains_unsplit_when_only_boundary_would_separate_an_article(
+    split_lyric_result,
+) -> None:
+    result = split_lyric_result(
+        "x de woord",
+        "nl",
+        4,
+        minimum_fragment_length=3,
+    )
+
+    assert result.text == "x de woord"
+    assert "de//" not in result.text
+
+
+def test_planned_split_moves_to_closest_balanced_edge_of_two_character_word(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    splitter = importlib.import_module("lyrics_dashboard.splitter")
+    monkeypatch.setattr(splitter, "_chinese_word_boundaries", lambda _text: ())
+    source = "\u8cdc\u6211\u6c38\u5e73\u5b89\u76f4\u5230\u6c38\u9060"
+    result = splitter.split_lyric_result(source, "zh", 4)
+
+    assert result.text == "\u8cdc\u6211\u6c38\u5e73\u5b89//\u76f4\u5230\u6c38\u9060"
+    assert "\u5e73//\u5b89" not in result.text
+    assert result.text.replace("//", "") == source
+    assert result.used_character_fallback is True
+
+
+def test_subpair_inside_a_longer_jieba_token_gets_no_new_special_treatment(
+    split_lyric_result,
+) -> None:
+    source = "\u7532\u4e59\u4e2d\u534e\u4eba\u6c11\u5171\u548c\u56fd\u4e19"
+    result = split_lyric_result(
+        source,
+        "zh",
+        4,
+        minimum_fragment_length=4,
+    )
+
+    assert result.text == "\u7532\u4e59\u4e2d\u534e\u4eba//\u6c11\u5171\u548c\u56fd\u4e19"
+    assert result.text.replace("//", "") == source
+    assert result.used_character_fallback is True
+
+
+def test_two_character_word_elsewhere_does_not_change_the_planned_split() -> None:
+    source = "\u7532\u4fe1\u5be6\u4e59\u6211\u4f60\u4e19\u4e01"
+
+    assert (
+        split_lyric(source, "zh", 4)
+        == "\u7532\u4fe1\u5be6\u4e59//\u6211\u4f60\u4e19\u4e01"
+    )
+
+
+def test_two_character_words_do_not_cause_short_text_to_split() -> None:
+    source = "\u7532\u4fe1\u5be6\u4e59"
+
+    assert split_lyric(source, "zh", 4) == source
+
+
+def test_unrecognised_character_pair_is_not_specially_protected(
+    split_lyric_result,
+) -> None:
+    source = "\u7532\u4e59\u6211\u4f60\u4e19\u4e01"
+    result = split_lyric_result(
+        source,
+        "zh",
+        4,
+        minimum_fragment_length=3,
+    )
+
+    assert result.text == "\u7532\u4e59\u6211//\u4f60\u4e19\u4e01"
+    assert result.text.replace("//", "") == source
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    (
+        (
+            "\u5e73\u5b89\u7532\u4e59\u4e19\u4e01\u620a\u5df1",
+            "\u5e73\u5b89//\u7532\u4e59\u4e19\u4e01\u620a\u5df1",
+        ),
+        (
+            "\u7532\u4e59\u4e19\u4e01\u620a\u5df1\u5e73\u5b89",
+            "\u7532\u4e59\u4e19\u4e01//\u620a\u5df1\u5e73\u5b89",
+        ),
+    ),
+)
+def test_two_character_words_at_text_edges_get_no_new_special_treatment(
+    source: str,
+    expected: str,
+) -> None:
+    assert split_lyric(source, "zh", 4) == expected
+
+
+def test_chinese_text_remains_unsplit_when_no_safe_adjustment_exists(
+    split_lyric_result,
+) -> None:
+    source = "\u7532\u4e59\u5e73\u5b89\u4e19\u4e01"
+    result = split_lyric_result(
+        source,
+        "zh",
+        4,
+        minimum_fragment_length=3,
+    )
+
+    assert result.text == source
+    assert "\u5e73//\u5b89" not in result.text
+    assert result.used_character_fallback is False
+
+
 # Requirement 18 is covered by the pre-existing parser, alignment, conversion,
 # switch-point, AppTest preview, and download tests. Those tests remain unchanged.

@@ -81,8 +81,9 @@ The document must use recognizable headings such as `Verse 1`, `Chorus 1`, `Brid
 - A cleaned lyric receives no `//` when it is within the applicable first- or second-side limit.
 - First-side safe boundaries are accepted only when both fragments contain at least two characters and at least 25% of the cleaned text. This prevents the lower limit from creating tiny fragments. Dutch remains unsplit when no acceptable word-safe boundary exists; Chinese retains its existing warned character fallback.
 - A long Chinese lyric is divided at the closest balanced `jieba` word boundary.
+- If a planned Chinese boundary falls inside an exact two-character Chinese token recognised by local `jieba` in the middle of the lyric, the boundary moves directly before or after that complete word. The closest valid, reasonably balanced adjacent boundary is used; if no safe alternative satisfies the existing fragment rules, the Chinese side remains unsplit.
 - If the local segmenter finds no Chinese word boundary, existing whitespace is tried before a last-resort character boundary. The dashboard shows a non-blocking warning when that fallback is used.
-- A long Dutch lyric is divided only at the closest balanced whitespace boundary, never inside a word.
+- A long Dutch or English lyric is divided only at the closest balanced whitespace boundary, never inside a word. A middle-sentence standalone Dutch article (`de`, `het`, or `een`) or English article (`a`, `an`, or `the`) stays with the word immediately following it; sentence-initial articles keep the existing behavior.
 - Each language receives at most one `//` per output row, even when the text is extremely long.
 - Apart from the required punctuation removal and whitespace normalization, lyric characters and words are never translated, rewritten, deleted, duplicated, or reordered.
 - Export is blocked until all detected sections and lines have valid reciprocal mappings.
