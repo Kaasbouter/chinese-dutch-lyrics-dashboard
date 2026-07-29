@@ -174,3 +174,25 @@ def test_protected_boundaries_work_on_both_sides_after_language_switch() -> None
         "\u8cdc\u6211\u6c38\u5e73\u5b89//\u76f4\u5230\u6c38\u9060",
     ]
     assert all(side.count("//") <= 1 for row in rows for side in row.split("|"))
+
+
+def test_uw_protection_works_before_and_after_pipe_and_language_switch() -> None:
+    chinese = "\u77ed\u6b4c"
+    dutch = "dit is uw belofte"
+    parsed, plan = _single_pair(chinese, dutch)
+
+    output = convert_lyrics(
+        parsed,
+        plan,
+        ConversionSettings(
+            switch_index=1,
+            chinese_max_length=10,
+            dutch_max_length=10,
+        ),
+    )
+
+    assert _lyric_rows(output) == [
+        f"{chinese}|dit is//uw belofte",
+        f"dit is//uw belofte|{chinese}",
+    ]
+    assert "uw//belofte" not in output

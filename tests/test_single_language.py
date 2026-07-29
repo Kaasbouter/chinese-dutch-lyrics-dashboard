@@ -165,6 +165,17 @@ def test_single_latin_splitting_is_word_safe_and_protects_articles(
     assert "the//" not in lyric
 
 
+def test_single_language_uw_stays_with_the_following_word() -> None:
+    output = _convert(
+        "Title\n\nVerse 1\ndit is uw belofte\n",
+        ConversionSettings(dutch_max_length=10),
+    )
+    lyric = output.split("[Verse 1]\n", 1)[1].strip()
+
+    assert lyric == "dit is//uw belofte"
+    assert "uw//belofte" not in lyric
+
+
 def test_single_chinese_uses_existing_targeted_word_protection() -> None:
     source_line = "\u8cdc\u6211\u6c38\u5e73\u5b89\u76f4\u5230\u6c38\u9060"
     parsed = parse_lyrics(

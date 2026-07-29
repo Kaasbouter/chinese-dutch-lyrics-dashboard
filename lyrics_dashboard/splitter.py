@@ -13,7 +13,7 @@ from .text_processing import LanguageCode, clean_content_result
 jieba.setLogLevel(logging.WARNING)
 _CHINESE_TOKENIZER = jieba.Tokenizer()
 MINIMUM_SPLIT_LIMIT = 4
-_PROTECTED_ARTICLES = frozenset({"de", "het", "een", "a", "an", "the"})
+_PROTECTED_ARTICLES = frozenset({"de", "het", "een", "uw", "a", "an", "the"})
 
 
 @dataclass(frozen=True)
@@ -80,7 +80,7 @@ def _article_safe_boundaries(
     text: str,
     candidates: Iterable[int],
 ) -> tuple[int, ...]:
-    """Exclude boundaries after protected middle-sentence articles."""
+    """Exclude boundaries after protected middle-sentence words."""
     safe: list[int] = []
     for boundary in candidates:
         left_words = text[:boundary].rstrip().split()

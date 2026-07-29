@@ -323,28 +323,31 @@ def test_splitting_loses_reorders_or_rewrites_no_cleaned_content(
 
 
 @pytest.mark.parametrize(
-    "article",
+    "protected_word",
     (
         "de",
         "het",
         "een",
+        "uw",
         "a",
         "an",
         "the",
         "De",
         "HET",
         "Een",
+        "Uw",
+        "UW",
         "The",
         "AN",
         "A",
     ),
 )
-def test_middle_dutch_and_english_articles_stay_with_the_following_word(
-    article: str,
+def test_middle_protected_words_stay_with_the_following_word(
+    protected_word: str,
 ) -> None:
     assert (
-        split_lyric(f"dit is {article} nieuw lied", "nl", 8)
-        == f"dit is//{article} nieuw lied"
+        split_lyric(f"dit is {protected_word} nieuw lied", "nl", 8)
+        == f"dit is//{protected_word} nieuw lied"
     )
 
 
@@ -354,28 +357,47 @@ def test_boundaries_before_an_article_and_after_its_follower_remain_allowed() ->
         split_lyric("ik kom tot de Heer om Hem te aanbidden", "nl", 10)
         == "ik kom tot de Heer//om Hem te aanbidden"
     )
+    assert (
+        split_lyric("dit is uw belofte voor altijd", "nl", 10)
+        == "dit is uw belofte//voor altijd"
+    )
 
 
-def test_sentence_initial_articles_and_partial_matches_keep_existing_behavior() -> None:
+def test_uw_only_changes_a_boundary_directly_after_the_standalone_word() -> None:
+    assert (
+        split_lyric("dit is uwbelofte voor altijd", "nl", 10)
+        == "dit is uwbelofte//voor altijd"
+    )
+    assert (
+        split_lyric("dit uw is een mooie belofte", "nl", 10)
+        == "dit uw is//een mooie belofte"
+    )
+    assert split_lyric("dit is u belofte", "nl", 10) == "dit is u//belofte"
+
+
+def test_sentence_initial_protected_words_and_partial_matches_keep_behavior() -> None:
     assert split_lyric("The Lord", "nl", 4) == "The//Lord"
+    assert split_lyric("Uw belofte", "nl", 4) == "Uw//belofte"
     assert (
         split_lyric("dit theater is mooi", "nl", 4)
         == "dit theater//is mooi"
     )
 
 
-def test_text_remains_unsplit_when_only_boundary_would_separate_an_article(
+@pytest.mark.parametrize("protected_word", ("de", "uw"))
+def test_text_remains_unsplit_when_only_boundary_would_separate_a_protected_word(
     split_lyric_result,
+    protected_word: str,
 ) -> None:
     result = split_lyric_result(
-        "x de woord",
+        f"x {protected_word} woord",
         "nl",
         4,
         minimum_fragment_length=3,
     )
 
-    assert result.text == "x de woord"
-    assert "de//" not in result.text
+    assert result.text == f"x {protected_word} woord"
+    assert f"{protected_word}//" not in result.text
 
 
 def test_planned_split_moves_to_closest_balanced_edge_of_two_character_word(
