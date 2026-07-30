@@ -14,6 +14,7 @@ from .text_processing import LanguageCode, clean_content_result
 jieba.setLogLevel(logging.WARNING)
 _CHINESE_TOKENIZER = jieba.Tokenizer()
 MINIMUM_SPLIT_LIMIT = 4
+_SINGLE_SPACE_MINIMUM_FRAGMENT_RATIO = 0.25
 _DUTCH_ARTICLES_AND_DETERMINERS = frozenset({"de", "het", "een", "uw"})
 _DUTCH_PERSONAL_PRONOUNS = frozenset(
     "ik mij me jij je jou u hij hem zij ze haar wij we ons jullie hen hun".split()
@@ -84,6 +85,20 @@ def _split_parts(text: str, boundary: int) -> tuple[str, str] | None:
     if not left or not right:
         return None
     return left, right
+
+
+def _without_equivalent_split(
+    text: str,
+    candidates: Iterable[int],
+    rejected_boundary: int,
+) -> tuple[int, ...]:
+    """Exclude both whitespace edges when they render one rejected split."""
+    rejected_parts = _split_parts(text, rejected_boundary)
+    return tuple(
+        boundary
+        for boundary in candidates
+        if _split_parts(text, boundary) != rejected_parts
+    )
 
 
 def _choose_balanced_boundary(
@@ -502,7 +517,21 @@ def split_lyric_result(
 
     cleaning = clean_content_result(text, language)
     cleaned = cleaning.text
-    if not cleaned or len(cleaned) <= max_length:
+    single_space_boundary: int | None = None
+    if (
+        language == "zh"
+        and cleaned.count(" ") == 1
+        and len(cleaning.original_whitespace_boundaries) == 1
+    ):
+        candidate = cleaning.original_whitespace_boundaries[0]
+        if _split_parts(cleaned, candidate) is not None:
+            single_space_boundary = candidate
+
+    # The separator can place an already-required split, but cannot require it.
+    threshold_length = len(cleaned) - (
+        1 if single_space_boundary is not None else 0
+    )
+    if not cleaned or threshold_length <= max_length:
         return SplitResult(cleaned)
     required_fragment_length = max(
         minimum_fragment_length,
@@ -538,6 +567,50 @@ def split_lyric_result(
         for boundary in _chinese_word_boundaries(cleaned)
         if boundary not in cleaning.punctuation_separator_boundaries
     )
+    if single_space_boundary is not None:
+        preferred_fragment_length = max(
+            required_fragment_length,
+            math.ceil(
+                len(cleaned) * _SINGLE_SPACE_MINIMUM_FRAGMENT_RATIO
+            ),
+        )
+        preferred_boundary = _choose_balanced_boundary(
+            cleaned,
+            (single_space_boundary,),
+            max_length,
+            preferred_fragment_length,
+        )
+        ranked_boundary = _choose_balanced_boundary(
+            cleaned,
+            (*word_candidates, single_space_boundary),
+            max_length,
+            required_fragment_length,
+            preferred_boundary=single_space_boundary,
+        )
+        if (
+            preferred_boundary == single_space_boundary
+            and ranked_boundary == single_space_boundary
+        ):
+            preferred_boundary = _adjust_boundary_around_protected_spans(
+                cleaned,
+                preferred_boundary,
+                (single_space_boundary,),
+                max_length,
+                preferred_fragment_length,
+                grammatical_spans,
+            )
+            if preferred_boundary == single_space_boundary:
+                left, right = _split_parts(
+                    cleaned,
+                    preferred_boundary,
+                ) or (cleaned, "")
+                return SplitResult(f"{left}//{right}" if right else left)
+        word_candidates = _without_equivalent_split(
+            cleaned,
+            word_candidates,
+            single_space_boundary,
+        )
+
     word_boundary = _choose_balanced_boundary(
         cleaned,
         word_candidates,
@@ -557,6 +630,12 @@ def split_lyric_result(
             left, right = _split_parts(cleaned, word_boundary) or (cleaned, "")
             return SplitResult(f"{left}//{right}" if right else left)
     whitespace_candidates = cleaning.original_whitespace_boundaries
+    if single_space_boundary is not None:
+        whitespace_candidates = _without_equivalent_split(
+            cleaned,
+            whitespace_candidates,
+            single_space_boundary,
+        )
     whitespace_boundary = _choose_balanced_boundary(
         cleaned,
         whitespace_candidates,
@@ -576,6 +655,12 @@ def split_lyric_result(
             left, right = _split_parts(cleaned, whitespace_boundary) or (cleaned, "")
             return SplitResult(f"{left}//{right}" if right else left)
     character_candidates = _character_boundaries(cleaned)
+    if single_space_boundary is not None:
+        character_candidates = _without_equivalent_split(
+            cleaned,
+            character_candidates,
+            single_space_boundary,
+        )
     character_boundary = _choose_balanced_boundary(
         cleaned,
         character_candidates,
