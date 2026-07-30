@@ -323,6 +323,380 @@ def test_splitting_loses_reorders_or_rewrites_no_cleaned_content(
 
 
 @pytest.mark.parametrize(
+    ("source", "expected", "forbidden"),
+    (
+        (
+            "groot U bent de bron",
+            "groot//U bent de bron",
+            "U//bent",
+        ),
+        (
+            "groot ik geloof in U",
+            "groot//ik geloof in U",
+            "ik//geloof",
+        ),
+        (
+            "genade trouw wij vertrouwen op U",
+            "genade trouw//wij vertrouwen op U",
+            "wij//vertrouwen",
+        ),
+    ),
+)
+def test_dutch_personal_pronouns_move_with_their_following_word(
+    source: str,
+    expected: str,
+    forbidden: str,
+) -> None:
+    result = split_lyric(source, "nl", 4)
+
+    assert result == expected
+    assert forbidden not in result
+
+
+@pytest.mark.parametrize(
+    ("source", "expected", "forbidden"),
+    (
+        (
+            "genade trouw you are the light",
+            "genade trouw//you are the light",
+            "you//are",
+        ),
+        (
+            "genade trouw we believe in You",
+            "genade trouw//we believe in You",
+            "we//believe",
+        ),
+        (
+            "groot I trust in You",
+            "groot//I trust in You",
+            "I//trust",
+        ),
+    ),
+)
+def test_english_personal_pronouns_move_with_their_following_word(
+    source: str,
+    expected: str,
+    forbidden: str,
+) -> None:
+    result = split_lyric(source, "nl", 4)
+
+    assert result == expected
+    assert forbidden not in result
+
+
+@pytest.mark.parametrize(
+    ("source", "maximum", "expected", "forbidden"),
+    (
+        ("zing van hoop vervuld", 4, "zing//van hoop vervuld", "van//hoop"),
+        (
+            "genade trouw in het licht",
+            10,
+            "genade trouw//in het licht",
+            "in//het licht",
+        ),
+        ("zing met U wandelen", 4, "zing//met U wandelen", "met//U"),
+        ("ja voor altijd zingen", 4, "ja//voor altijd zingen", "voor//altijd"),
+        ("wij gaan naar U", 8, "wij gaan//naar U", "naar//U"),
+        (
+            "wij leven door Uw genade",
+            12,
+            "wij leven//door Uw genade",
+            "door//Uw genade",
+        ),
+    ),
+)
+def test_dutch_prepositions_stay_with_their_local_phrase(
+    source: str,
+    maximum: int,
+    expected: str,
+    forbidden: str,
+) -> None:
+    result = split_lyric(source, "nl", maximum)
+
+    assert result == expected
+    assert forbidden not in result
+
+
+@pytest.mark.parametrize(
+    ("source", "maximum", "expected", "forbidden"),
+    (
+        ("zing of hope filled", 4, "zing//of hope filled", "of//hope"),
+        (
+            "genade trouw in the light",
+            10,
+            "genade trouw//in the light",
+            "in//the light",
+        ),
+        ("ja with You walking", 4, "ja//with You walking", "with//You"),
+        ("zing for ever singing", 4, "zing//for ever singing", "for//ever"),
+        ("we sing to You", 7, "we sing//to You", "to//You"),
+        (
+            "genade trouw through Your grace",
+            10,
+            "genade trouw//through Your grace",
+            "through//Your grace",
+        ),
+    ),
+)
+def test_english_prepositions_stay_with_their_local_phrase(
+    source: str,
+    maximum: int,
+    expected: str,
+    forbidden: str,
+) -> None:
+    result = split_lyric(source, "nl", maximum)
+
+    assert result == expected
+    assert forbidden not in result
+
+
+@pytest.mark.parametrize(
+    "chain",
+    (
+        "in het licht",
+        "van de Heer",
+        "of the Lord",
+        "with a promise",
+        "voor een nieuw begin",
+        "with Your strength",
+        "for a new beginning",
+    ),
+)
+def test_consecutive_lead_words_form_one_short_protected_chain(
+    chain: str,
+) -> None:
+    source = f"genade trouw {chain}"
+
+    assert split_lyric(source, "nl", 10) == f"genade trouw//{chain}"
+
+
+def test_balanced_boundary_before_a_mid_line_chain_is_preferred(
+    split_lyric_result,
+) -> None:
+    source = "aaaa bbbb of the Lord zzzz yyyy"
+    result = split_lyric_result(
+        source,
+        "nl",
+        13,
+        minimum_fragment_length=2,
+        minimum_fragment_ratio=0.25,
+    )
+
+    assert result.text == "aaaa bbbb//of the Lord zzzz yyyy"
+    assert "of//the Lord" not in result.text
+    assert "of the//Lord" not in result.text
+
+
+def test_before_chain_preference_preserves_within_limit_ranking(
+    split_lyric_result,
+) -> None:
+    source = "aaaa bbbb in the light zzzz yyyy qqq"
+    result = split_lyric_result(
+        source,
+        "nl",
+        22,
+        minimum_fragment_length=2,
+        minimum_fragment_ratio=0.25,
+    )
+
+    assert result.text == "aaaa bbbb in the light//zzzz yyyy qqq"
+    assert all(len(part) <= 22 for part in result.text.split("//"))
+
+
+def test_before_chain_preference_does_not_worsen_balance() -> None:
+    assert (
+        split_lyric("ja in het licht staan", "nl", 4)
+        == "ja in het licht//staan"
+    )
+
+
+@pytest.mark.parametrize(
+    ("source", "maximum", "forbidden"),
+    (
+        (
+            "aa voor een nieuw begin zz",
+            4,
+            "voor een nieuw//begin",
+        ),
+        (
+            "we worship with Your strength today",
+            17,
+            "with Your//strength",
+        ),
+        (
+            "we live through Your grace",
+            13,
+            "through Your//grace",
+        ),
+        ("de new ik alpha", 4, "ik//alpha"),
+        ("for a new we believe", 4, "we//believe"),
+    ),
+)
+def test_local_determiner_and_modifier_chains_have_no_internal_boundary(
+    source: str,
+    maximum: int,
+    forbidden: str,
+) -> None:
+    result = split_lyric(source, "nl", maximum)
+
+    assert forbidden not in result
+    assert result.replace("//", " ").split() == source.split()
+
+
+@pytest.mark.parametrize(
+    ("source", "expected", "forbidden"),
+    (
+        (
+            "\u7532\u4e59\u6211\u76f8\u4fe1\u4e19\u4e01",
+            "\u7532\u4e59//\u6211\u76f8\u4fe1\u4e19\u4e01",
+            "\u6211//\u76f8\u4fe1",
+        ),
+        (
+            "\u7532\u4e59\u5728\u7962\u88e1\u9762\u4e19\u4e01",
+            "\u7532\u4e59//\u5728\u7962\u88e1\u9762\u4e19\u4e01",
+            "\u5728//\u7962\u88e1\u9762",
+        ),
+        (
+            "\u7532\u4e59\u5979\u5011\u76f8\u4fe1\u4e19\u4e01",
+            "\u7532\u4e59//\u5979\u5011\u76f8\u4fe1\u4e19\u4e01",
+            "\u5979\u5011//\u76f8\u4fe1",
+        ),
+        (
+            "\u7532\u4e59\u70ba\u4e86\u76fc\u671b\u4e19\u4e01",
+            "\u7532\u4e59//\u70ba\u4e86\u76fc\u671b\u4e19\u4e01",
+            "\u70ba\u4e86//\u76fc\u671b",
+        ),
+    ),
+)
+def test_chinese_pronouns_and_coverbs_use_existing_jieba_token_spans(
+    source: str,
+    expected: str,
+    forbidden: str,
+) -> None:
+    result = split_lyric(source, "zh", 4)
+
+    assert result == expected
+    assert forbidden not in result
+    assert result.replace("//", "") == source
+
+
+def test_chinese_protected_chain_at_start_never_creates_a_leading_split() -> None:
+    source = "\u5728\u7962\u88e1\u9762\u6211\u6709\u5e73\u5b89"
+    result = split_lyric(source, "zh", 4)
+
+    assert result == "\u5728\u7962\u88e1\u9762//\u6211\u6709\u5e73\u5b89"
+    assert not result.startswith("//")
+    assert "\u5728//" not in result
+    assert result.replace("//", "") == source
+
+
+def test_character_fallback_applies_grammar_and_two_character_safety_together(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    splitter = importlib.import_module("lyrics_dashboard.splitter")
+    monkeypatch.setattr(splitter, "_chinese_word_boundaries", lambda _text: ())
+    source = "\u7532\u4e59\u6211\u76f8\u4fe1\u4e19\u4e01"
+
+    result = splitter.split_lyric_result(source, "zh", 4)
+
+    assert result.text == "\u7532\u4e59//\u6211\u76f8\u4fe1\u4e19\u4e01"
+    assert "\u6211//\u76f8\u4fe1" not in result.text
+    assert "\u76f8//\u4fe1" not in result.text
+    assert result.text.replace("//", "") == source
+    assert result.used_character_fallback is True
+
+
+@pytest.mark.parametrize(
+    ("source", "language", "maximum"),
+    (
+        ("U bent", "nl", 20),
+        ("the light", "nl", 20),
+        ("in het licht", "nl", 20),
+        ("\u6211\u76f8\u4fe1", "zh", 8),
+        ("\u5728\u7962\u88e1\u9762", "zh", 8),
+    ),
+)
+def test_grammatical_protection_never_creates_a_new_split(
+    source: str,
+    language: str,
+    maximum: int,
+) -> None:
+    assert split_lyric(source, language, maximum) == source
+
+
+def test_protected_word_elsewhere_does_not_change_a_safe_planned_boundary() -> None:
+    source = "the melody rises brightly in our hearts"
+
+    assert split_lyric(source, "nl", 16) == (
+        "the melody rises//brightly in our hearts"
+    )
+
+
+def test_invalid_before_chain_move_uses_the_closest_balanced_safe_boundary(
+    split_lyric_result,
+) -> None:
+    result = split_lyric_result(
+        "x wij ga huis",
+        "nl",
+        4,
+        minimum_fragment_length=2,
+        minimum_fragment_ratio=0.25,
+    )
+
+    assert result.text == "x wij ga//huis"
+    assert "wij//ga" not in result.text
+    assert min(map(len, result.text.split("//"))) >= 4
+
+
+def test_line_remains_unsplit_when_no_grammatical_and_balanced_boundary_exists(
+    split_lyric_result,
+) -> None:
+    source = "x wij superlangwoord"
+    result = split_lyric_result(
+        source,
+        "nl",
+        4,
+        minimum_fragment_length=2,
+        minimum_fragment_ratio=0.25,
+    )
+
+    assert result.text == source
+    assert "//" not in result.text
+
+
+@pytest.mark.parametrize("source", ("aa bbbbbbbb", "aaaaaaaa bb"))
+def test_existing_quarter_fragment_guard_rejects_two_eight_style_splits(
+    split_lyric_result,
+    source: str,
+) -> None:
+    result = split_lyric_result(
+        source,
+        "nl",
+        4,
+        minimum_fragment_length=2,
+        minimum_fragment_ratio=0.25,
+    )
+
+    assert result.text == source
+    assert "//" not in result.text
+
+
+def test_protected_matching_is_case_insensitive_but_never_partial() -> None:
+    assert (
+        split_lyric("genade trouw WE believe in You", "nl", 4)
+        == "genade trouw//WE believe in You"
+    )
+    assert (
+        split_lyric("genade trouw IN the light", "nl", 4)
+        == "genade trouw//IN the light"
+    )
+    assert (
+        split_lyric("we sing insideout melodies now", "nl", 12)
+        == "we sing insideout//melodies now"
+    )
+
+
+@pytest.mark.parametrize(
     "protected_word",
     (
         "de",
@@ -351,8 +725,8 @@ def test_middle_protected_words_stay_with_the_following_word(
     )
 
 
-def test_boundaries_before_an_article_and_after_its_follower_remain_allowed() -> None:
-    assert split_lyric("ik kom tot de Heer", "nl", 10) == "ik kom tot//de Heer"
+def test_boundaries_before_complete_chains_and_after_their_follower_are_allowed() -> None:
+    assert split_lyric("ik kom tot de Heer", "nl", 10) == "ik kom//tot de Heer"
     assert (
         split_lyric("ik kom tot de Heer om Hem te aanbidden", "nl", 10)
         == "ik kom tot de Heer//om Hem te aanbidden"
@@ -363,7 +737,7 @@ def test_boundaries_before_an_article_and_after_its_follower_remain_allowed() ->
     )
 
 
-def test_uw_only_changes_a_boundary_directly_after_the_standalone_word() -> None:
+def test_protection_uses_exact_standalone_tokens() -> None:
     assert (
         split_lyric("dit is uwbelofte voor altijd", "nl", 10)
         == "dit is uwbelofte//voor altijd"
@@ -372,12 +746,12 @@ def test_uw_only_changes_a_boundary_directly_after_the_standalone_word() -> None
         split_lyric("dit uw is een mooie belofte", "nl", 10)
         == "dit uw is//een mooie belofte"
     )
-    assert split_lyric("dit is u belofte", "nl", 10) == "dit is u//belofte"
+    assert split_lyric("dit is u belofte", "nl", 10) == "dit is//u belofte"
 
 
-def test_sentence_initial_protected_words_and_partial_matches_keep_behavior() -> None:
-    assert split_lyric("The Lord", "nl", 4) == "The//Lord"
-    assert split_lyric("Uw belofte", "nl", 4) == "Uw//belofte"
+def test_sentence_initial_protected_words_never_create_a_leading_split() -> None:
+    assert split_lyric("The Lord", "nl", 4) == "The Lord"
+    assert split_lyric("Uw belofte", "nl", 4) == "Uw belofte"
     assert (
         split_lyric("dit theater is mooi", "nl", 4)
         == "dit theater//is mooi"
@@ -448,7 +822,7 @@ def test_two_character_words_do_not_cause_short_text_to_split() -> None:
 def test_unrecognised_character_pair_is_not_specially_protected(
     split_lyric_result,
 ) -> None:
-    source = "\u7532\u4e59\u6211\u4f60\u4e19\u4e01"
+    source = "\u7532\u4e59\u58ec\u7678\u4e19\u4e01"
     result = split_lyric_result(
         source,
         "zh",
@@ -456,7 +830,7 @@ def test_unrecognised_character_pair_is_not_specially_protected(
         minimum_fragment_length=3,
     )
 
-    assert result.text == "\u7532\u4e59\u6211//\u4f60\u4e19\u4e01"
+    assert result.text == "\u7532\u4e59\u58ec//\u7678\u4e19\u4e01"
     assert result.text.replace("//", "") == source
 
 

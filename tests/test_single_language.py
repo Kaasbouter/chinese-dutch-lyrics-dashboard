@@ -176,6 +176,50 @@ def test_single_language_uw_stays_with_the_following_word() -> None:
     assert "uw//belofte" not in lyric
 
 
+@pytest.mark.parametrize(
+    ("source_line", "expected", "forbidden"),
+    (
+        (
+            "genade trouw we believe in You",
+            "genade trouw//we believe in You",
+            "we//believe",
+        ),
+        (
+            "genade trouw in het licht",
+            "genade trouw//in het licht",
+            "in//het licht",
+        ),
+    ),
+)
+def test_single_latin_flow_keeps_grammatical_chains_together(
+    source_line: str,
+    expected: str,
+    forbidden: str,
+) -> None:
+    output = _convert(
+        f"Title\n\nVerse 1\n{source_line}\n",
+        ConversionSettings(dutch_max_length=13),
+    )
+    lyric = output.split("[Verse 1]\n", 1)[1].strip()
+
+    assert lyric == expected
+    assert forbidden not in lyric
+    assert lyric.replace("//", " ").split() == source_line.split()
+
+
+def test_single_chinese_flow_keeps_a_pronoun_with_its_following_token() -> None:
+    source_line = "\u7532\u4e59\u6211\u76f8\u4fe1\u4e19\u4e01"
+    output = _convert(
+        f"\u6b4c\u540d\n\nVerse 1\n{source_line}\n",
+        ConversionSettings(chinese_max_length=5),
+    )
+    lyric = output.split("[Verse 1]\n", 1)[1].strip()
+
+    assert lyric == "\u7532\u4e59//\u6211\u76f8\u4fe1\u4e19\u4e01"
+    assert "\u6211//\u76f8\u4fe1" not in lyric
+    assert lyric.replace("//", "") == source_line
+
+
 def test_single_chinese_uses_existing_targeted_word_protection() -> None:
     source_line = "\u8cdc\u6211\u6c38\u5e73\u5b89\u76f4\u5230\u6c38\u9060"
     parsed = parse_lyrics(

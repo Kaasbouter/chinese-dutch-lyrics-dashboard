@@ -91,7 +91,7 @@ def test_same_text_uses_stricter_limit_only_before_pipe_after_switch() -> None:
     rows = _lyric_rows(output)
 
     assert rows == [
-        "\u4eca\u5929\u6211\u4eec//\u4e00\u8d77\u8d5e\u7f8e\u4e0a\u5e1d|"
+        "\u4eca\u5929\u6211\u4eec\u4e00\u8d77//\u8d5e\u7f8e\u4e0a\u5e1d|"
         "een middelgrote Nederlandse liedregel",
         "een middelgrote//Nederlandse liedregel|"
         "\u4eca\u5929\u6211\u4eec\u4e00\u8d77\u8d5e\u7f8e\u4e0a\u5e1d",
@@ -111,6 +111,7 @@ def test_same_text_uses_stricter_limit_only_before_pipe_after_switch() -> None:
     assert min(map(len, chinese_parts)) >= math.ceil(len(chinese) * 0.25)
     assert min(map(len, dutch_parts)) >= math.ceil(len(dutch) * 0.25)
     assert "\u6211//\u4eec" not in chinese_first
+    assert "\u6211\u4eec//\u4e00\u8d77" not in chinese_first
     assert "\u4e00//\u8d77" not in chinese_first
     assert all(part in dutch.split() for part in dutch_first.replace("//", " ").split())
 
@@ -196,3 +197,30 @@ def test_uw_protection_works_before_and_after_pipe_and_language_switch() -> None
         f"dit is//uw belofte|{chinese}",
     ]
     assert "uw//belofte" not in output
+
+
+def test_grammatical_chains_work_on_both_sides_of_pipe_and_switch() -> None:
+    chinese = "\u7532\u4e59\u5728\u7962\u88e1\u9762\u4e19\u4e01"
+    dutch = "genade trouw we believe in You"
+    parsed, plan = _single_pair(chinese, dutch)
+
+    output = convert_lyrics(
+        parsed,
+        plan,
+        ConversionSettings(
+            switch_index=1,
+            chinese_max_length=5,
+            dutch_max_length=13,
+        ),
+    )
+    rows = _lyric_rows(output)
+
+    assert rows == [
+        "\u7532\u4e59//\u5728\u7962\u88e1\u9762\u4e19\u4e01|"
+        "genade trouw//we believe in You",
+        "genade trouw//we believe in You|"
+        "\u7532\u4e59//\u5728\u7962\u88e1\u9762\u4e19\u4e01",
+    ]
+    assert "\u5728//\u7962\u88e1\u9762" not in output
+    assert "we//believe" not in output
+    assert all(side.count("//") <= 1 for row in rows for side in row.split("|"))

@@ -276,8 +276,8 @@ if single_language_mode:
         st.caption(
             "Punctuation is removed before measuring. The sole language is treated as the "
             "first output side and therefore uses the existing stricter 80% limit, even "
-            "though no `|` is generated. Existing word-safe, article-protection, Chinese "
-            "segmentation, balance, and minimum-fragment rules remain active. Current "
+            "though no `|` is generated. Existing word-safe, grammatical-phrase protection, "
+            "Chinese segmentation, balance, and minimum-fragment rules remain active. Current "
             f"normal/sole-language limits: {normal_limit}/"
             f"{derive_first_side_limit(normal_limit)}."
         )

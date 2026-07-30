@@ -36,7 +36,7 @@ Chinese-only, Dutch-only, English-only, and other Latin-script lyric files are s
 - Sections and lyric lines keep their uploaded order.
 - Output contains only the detected language and never generates `|` or an empty language placeholder.
 - The sole language is treated as the first output side, so every lyric line uses the existing stricter `max(4, floor(normal limit × 0.80))` threshold and the existing first-side minimum-fragment rules.
-- Punctuation removal, whitespace normalization, the one-`//` limit, Latin whitespace/article protection, Chinese `jieba` protection, fallback warnings, editable preview, and UTF-8 TXT download remain active.
+- Punctuation removal, whitespace normalization, the one-`//` limit, Latin whitespace/grammatical-phrase protection, Chinese `jieba` protection, fallback warnings, editable preview, and UTF-8 TXT download remain active.
 
 ## Unequal song structures
 
@@ -90,8 +90,10 @@ The document must use recognizable headings such as `Verse 1`, `Chorus 1`, `Brid
 - First-side safe boundaries are accepted only when both fragments contain at least two characters and at least 25% of the cleaned text. This prevents the lower limit from creating tiny fragments. Dutch remains unsplit when no acceptable word-safe boundary exists; Chinese retains its existing warned character fallback.
 - A long Chinese lyric is divided at the closest balanced `jieba` word boundary.
 - If a planned Chinese boundary falls inside an exact two-character Chinese token recognised by local `jieba` in the middle of the lyric, the boundary moves directly before or after that complete word. The closest valid, reasonably balanced adjacent boundary is used; if no safe alternative satisfies the existing fragment rules, the Chinese side remains unsplit.
+- A recognised standalone Chinese personal pronoun or common preposition-like/coverb token cannot be left directly before `//`. Consecutive protected lead tokens stay with the next local `jieba` token when the existing balance safeguards allow it.
 - If the local segmenter finds no Chinese word boundary, existing whitespace is tried before a last-resort character boundary. The dashboard shows a non-blocking warning when that fallback is used.
-- A long Dutch or English lyric is divided only at the closest balanced whitespace boundary, never inside a word. A middle-sentence standalone protected Dutch word (`de`, `het`, `een`, or `uw`) or English article (`a`, `an`, or `the`) stays with the word immediately following it; sentence-initial protected words keep the existing behavior.
+- A long Dutch or English lyric is divided only at the closest balanced whitespace boundary, never inside a word. A standalone protected personal pronoun, article/determiner, or preposition cannot be left directly before `//`. Consecutive protected lead words and their next local word form one short protected grammatical chain; explicit local patterns such as `with Your strength` and `voor een nieuw begin` also stay intact.
+- Grammatical protection runs only after the existing cleaned-length and positional rules already require a split. An unsafe planned boundary is re-ranked among the existing candidates and is preferably moved before the complete protected chain, but only when the unchanged length, balance, and minimum-fragment safeguards approve it. The rule never creates a new split or a leading `//`; when no logical and balanced candidate remains, that language side stays unsplit.
 - Each language receives at most one `//` per output row, even when the text is extremely long.
 - Apart from the required punctuation removal and whitespace normalization, lyric characters and words are never translated, rewritten, deleted, duplicated, or reordered.
 - Bilingual export is blocked until all detected sections and lines have valid reciprocal mappings. Single-language mode does not require mappings.
