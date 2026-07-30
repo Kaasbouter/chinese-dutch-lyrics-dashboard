@@ -259,3 +259,75 @@ def test_single_language_dashboard_skips_bilingual_controls_and_exports_preview(
     download_buttons = app.get("download_button")
     assert len(download_buttons) == 1
     assert download_buttons[0].label == "Download final TXT"
+
+
+def test_leading_link_never_reaches_manual_controls_preview_or_txt() -> None:
+    forbidden_marker = "forbidden-ui-marker"
+    source = (
+        f"https://example.invalid/{forbidden_marker}\n\n"
+        "中文歌名 | Nederlandse titel\n\n"
+        "Verse 1\n"
+        "中文歌词\n\n"
+        "Verse 2\n"
+        "Nederlandse liedregel\n"
+    )
+    app = AppTest.from_file(str(APP_PATH), default_timeout=10).run()
+    app.file_uploader[0].set_value(
+        ("leading-link.txt", source.encode("utf-8"), "text/plain")
+    ).run(timeout=10)
+
+    assert not app.exception
+    assert not app.error
+
+    manual_control_text = "\n".join(
+        [
+            *(multiselect.label for multiselect in app.multiselect),
+            *(str(dataframe.value) for dataframe in app.dataframe),
+            *(
+                component.proto.json_args
+                for component in app.get("component_instance")
+            ),
+        ]
+    ).lower()
+    status_text = "\n".join(
+        str(item.value)
+        for collection in (
+            app.error,
+            app.warning,
+            app.info,
+            app.success,
+            app.caption,
+            app.markdown,
+        )
+        for item in collection
+    ).lower()
+
+    assert forbidden_marker not in manual_control_text
+    assert forbidden_marker not in status_text
+
+    validate = next(
+        button
+        for button in app.button
+        if button.label == "Validate these manual matches"
+    )
+    validate.click().run(timeout=10)
+
+    assert not app.exception
+    assert not app.error
+    generated_preview = app.text_area[0].value
+    assert generated_preview == app.session_state["edited_output"]
+    assert forbidden_marker not in generated_preview.lower()
+    assert encode_utf8_txt(generated_preview).decode("utf-8") == generated_preview
+
+    edited_preview = generated_preview.replace(
+        "Nederlandse titel",
+        "Aangepaste titel",
+    )
+    app.text_area[0].set_value(edited_preview).run(timeout=10)
+
+    assert app.text_area[0].value == edited_preview
+    assert app.session_state["edited_output"] == edited_preview
+    assert forbidden_marker not in edited_preview.lower()
+    downloaded_txt = encode_utf8_txt(app.text_area[0].value)
+    assert downloaded_txt.decode("utf-8") == edited_preview
+    assert forbidden_marker.encode("utf-8") not in downloaded_txt.lower()

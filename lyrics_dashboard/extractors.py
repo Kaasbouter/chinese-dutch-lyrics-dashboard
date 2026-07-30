@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import io
+import re
 from pathlib import Path
 
 from .errors import ExtractionError
+from .text_processing import remove_leading_links
 
 TEXT_EXTENSIONS = {".txt", ".md", ".csv", ".json", ".xml", ".html", ".htm"}
 SUPPORTED_EXTENSIONS = {
@@ -45,21 +47,61 @@ def _decode_text(data: bytes) -> str:
     raise ExtractionError("The text file encoding could not be detected.")
 
 
-def _extract_docx(data: bytes) -> str:
+def _extract_docx(data: bytes) -> tuple[str, frozenset[int]]:
     from docx import Document
+    from docx.oxml.ns import qn
     from docx.table import Table
     from docx.text.paragraph import Paragraph
 
     document = Document(io.BytesIO(data))
     lines: list[str] = []
+    hyperlink_line_indices: set[int] = set()
+    hyperlink_tag = qn("w:hyperlink")
+    simple_field_tag = qn("w:fldSimple")
+    field_instruction_attribute = qn("w:instr")
+    instruction_text_tag = qn("w:instrText")
+
+    def is_hyperlink_paragraph(paragraph: Paragraph) -> bool:
+        if paragraph.hyperlinks:
+            return True
+
+        complex_field_instruction: list[str] = []
+        for element in paragraph._p.iter():
+            if element.tag == hyperlink_tag:
+                return True
+            if element.tag == simple_field_tag:
+                instruction = element.get(field_instruction_attribute, "")
+                if re.search(r"\bHYPERLINK\b", instruction, re.IGNORECASE):
+                    return True
+            if element.tag == instruction_text_tag:
+                complex_field_instruction.append(element.text or "")
+
+        return bool(
+            re.search(
+                r"\bHYPERLINK\b",
+                "".join(complex_field_instruction),
+                re.IGNORECASE,
+            )
+        )
+
+    def append_paragraph(paragraph: Paragraph) -> None:
+        paragraph_lines = (
+            paragraph.text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+        )
+        first_line_index = len(lines)
+        lines.extend(paragraph_lines)
+        if is_hyperlink_paragraph(paragraph):
+            hyperlink_line_indices.update(range(first_line_index, len(lines)))
+
     for item in document.iter_inner_content():
         if isinstance(item, Paragraph):
-            lines.append(item.text)
+            append_paragraph(item)
         elif isinstance(item, Table):
             for row in item.rows:
                 for cell in row.cells:
-                    lines.extend(paragraph.text for paragraph in cell.paragraphs)
-    return "\n".join(lines)
+                    for paragraph in cell.paragraphs:
+                        append_paragraph(paragraph)
+    return "\n".join(lines), frozenset(hyperlink_line_indices)
 
 
 def _extract_pdf(data: bytes) -> str:
@@ -112,11 +154,12 @@ def extract_text(filename: str, data: bytes) -> str:
         supported = ", ".join(sorted(SUPPORTED_EXTENSIONS))
         raise ExtractionError(f"Unsupported file type '{suffix or 'unknown'}'. Supported types: {supported}")
 
+    hyperlink_line_indices: frozenset[int] = frozenset()
     try:
         if suffix in TEXT_EXTENSIONS:
             text = _decode_text(data)
         elif suffix == ".docx":
-            text = _extract_docx(data)
+            text, hyperlink_line_indices = _extract_docx(data)
         elif suffix == ".pdf":
             text = _extract_pdf(data)
         elif suffix == ".pptx":
@@ -130,6 +173,7 @@ def extract_text(filename: str, data: bytes) -> str:
     except Exception as exc:
         raise ExtractionError(f"Could not read '{filename}': {exc}") from exc
 
+    text = remove_leading_links(text, hyperlink_line_indices)
     if not text.strip():
         raise ExtractionError("The uploaded file did not contain readable text.")
     return text

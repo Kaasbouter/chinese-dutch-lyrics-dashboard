@@ -6,6 +6,7 @@ from collections.abc import Callable
 
 from .errors import PairingError, ParseError
 from .models import Language, ParsedLyrics, Section
+from .text_processing import remove_leading_links
 
 
 def _is_cjk_character(character: str) -> bool:
@@ -207,6 +208,7 @@ def _validate_single_language_candidate(
 
 def parse_lyrics(text: str) -> ParsedLyrics:
     """Parse a basic-format bilingual or single-language lyric document."""
+    text = remove_leading_links(text)
     lines = [_clean_line(line) for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
     if not any(lines):
         raise ParseError("The source text is empty.")

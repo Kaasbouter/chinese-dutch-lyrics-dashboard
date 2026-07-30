@@ -74,6 +74,12 @@ No Dutch reference syntax needs to be typed. The user must still review every ca
 
 The document must use recognizable headings such as `Verse 1`, `Chorus 1`, `Bridge`, or `Refrein 1`.
 
+## Leading links before the title
+
+Before title detection, the shared local preprocessing step scans from the start of the extracted document through any initial blank lines and link-only blocks. It ignores standalone `https://`, `http://`, `ftp://`, `www.`, YouTube, shortened, and clearly URL-like domain lines, including consecutive links and clearly continued wrapped URL fragments. After removing those links and their surrounding leading blank lines, the next ordinary non-empty line is processed by the existing title rules. An explicit `[Title]` marker is preserved while this scan continues to the actual title content.
+
+For DOCX uploads, a paragraph containing a hyperlink object in this leading area is removed in full, including custom display text such as “Open song website.” The relationship destination is never opened, validated, requested, or exposed to the parser, dashboard controls, preview, status messages, or TXT output. Scanning stops at the first ordinary title-content line, so URLs and hyperlink-formatted text later in the title or lyric content are not broadly removed.
+
 ## Output rules
 
 - Section names are surrounded by square brackets.
@@ -159,7 +165,7 @@ python -m streamlit run app.py
 - `lyrics_dashboard/parser.py` — title, section, and language parsing
 - `lyrics_dashboard/alignment.py` — exact manual mapping, reciprocal validation, and editable suggestions
 - `lyrics_dashboard/drag_mapping.py` — drag-board grouping, card decoding, and structured line mappings
-- `lyrics_dashboard/text_processing.py` — Unicode punctuation removal and whitespace normalization
+- `lyrics_dashboard/text_processing.py` — leading-link preprocessing, Unicode punctuation removal, and whitespace normalization
 - `lyrics_dashboard/splitter.py` — local word-safe and fallback `//` placement
 - `lyrics_dashboard/converter.py` — final TXT generation
 - `tests/` — regression tests
