@@ -25,6 +25,10 @@ _DUTCH_PREPOSITIONS = frozenset(
         "tijdens sinds volgens ondanks dankzij wegens behalve"
     ).split()
 )
+_DUTCH_UW_FOLLOWING_VERBS = frozenset(
+    "is zijn bent ben was waren wordt worden blijft blijven".split()
+)
+_MAX_DUTCH_UW_NOUN_PHRASE_TOKENS = 3
 _ENGLISH_ARTICLES_AND_DETERMINERS = frozenset({"a", "an", "the"})
 _CONTEXTUAL_ENGLISH_POSSESSIVE_DETERMINERS = frozenset({"your"})
 _CONTEXTUAL_LATIN_MODIFIERS = frozenset({"new", "nieuw"})
@@ -231,6 +235,41 @@ def _extend_local_latin_chain(
     return index
 
 
+def _protected_uw_noun_verb_spans(
+    tokens: tuple[tuple[str, int, int], ...],
+) -> tuple[tuple[int, int], ...]:
+    """Protect a mid-line ``uw`` noun phrase through its following verb."""
+    spans: list[tuple[int, int]] = []
+    for uw_index, (token, start, _end) in enumerate(tokens):
+        if uw_index == 0 or token.casefold() != "uw":
+            continue
+        if (
+            uw_index + 1 >= len(tokens)
+            or tokens[uw_index + 1][0].casefold()
+            in _DUTCH_UW_FOLLOWING_VERBS
+        ):
+            continue
+
+        first_verb_index = uw_index + 2
+        verb_search_end = min(
+            uw_index + _MAX_DUTCH_UW_NOUN_PHRASE_TOKENS + 2,
+            len(tokens),
+        )
+        for verb_index in range(first_verb_index, verb_search_end):
+            if (
+                tokens[verb_index][0].casefold()
+                not in _DUTCH_UW_FOLLOWING_VERBS
+            ):
+                continue
+
+            # Include the first token after the verb so the whitespace
+            # boundary immediately following the verb is also unsafe.
+            construction_end_index = min(verb_index + 1, len(tokens) - 1)
+            spans.append((start, tokens[construction_end_index][2]))
+            break
+    return tuple(spans)
+
+
 def _protected_grammatical_chain_spans(
     text: str,
     language: LanguageCode,
@@ -270,6 +309,8 @@ def _protected_grammatical_chain_spans(
             index += 1
         elif index - chain_start_index > 1:
             spans.append((tokens[chain_start_index][1], tokens[index - 1][2]))
+    if language == "nl":
+        spans.extend(_protected_uw_noun_verb_spans(tokens))
     return tuple(spans)
 
 
