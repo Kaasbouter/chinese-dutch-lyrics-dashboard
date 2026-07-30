@@ -30,11 +30,26 @@ _DUTCH_UW_FOLLOWING_VERBS = frozenset(
     "is zijn bent ben was waren wordt worden blijft blijven".split()
 )
 _MAX_DUTCH_UW_NOUN_PHRASE_TOKENS = 3
+_DUTCH_INDIRECT_OBJECT_PRONOUNS = frozenset(
+    "mij me jou je u hem haar ons jullie hen hun".split()
+)
+_DUTCH_POSSESSIVE_DETERMINERS = frozenset(
+    "mijn jouw uw zijn haar ons onze jullie hun".split()
+)
 _ENGLISH_ARTICLES_AND_DETERMINERS = frozenset({"a", "an", "the"})
 _CONTEXTUAL_ENGLISH_POSSESSIVE_DETERMINERS = frozenset({"your"})
 _CONTEXTUAL_LATIN_MODIFIERS = frozenset({"new", "nieuw"})
 _ENGLISH_PERSONAL_PRONOUNS = frozenset(
     "i me you he him she her it we us they them".split()
+)
+_ENGLISH_INDIRECT_OBJECT_PRONOUNS = frozenset(
+    "me you him her us them".split()
+)
+_ENGLISH_POSSESSIVE_DETERMINERS = frozenset(
+    "my your his her its our their".split()
+)
+_INDIRECT_OBJECT_SUBJECT_PRONOUNS = frozenset(
+    "he hij i ik it jij jullie she u we wij you ze zij".split()
 )
 _ENGLISH_PREPOSITIONS = frozenset(
     (
@@ -44,6 +59,49 @@ _ENGLISH_PREPOSITIONS = frozenset(
         "throughout to toward towards under underneath until up upon with "
         "within without"
     ).split()
+)
+_INDIRECT_OBJECT_PREPOSITIONS = frozenset({"aan", "voor", "to", "for"})
+_INDIRECT_OBJECT_PRONOUNS = (
+    _DUTCH_INDIRECT_OBJECT_PRONOUNS
+    | _ENGLISH_INDIRECT_OBJECT_PRONOUNS
+)
+_INDIRECT_OBJECT_POSSESSIVE_DETERMINERS = (
+    _DUTCH_POSSESSIVE_DETERMINERS
+    | _ENGLISH_POSSESSIVE_DETERMINERS
+)
+_INDIRECT_OBJECT_DETERMINERS = frozenset().union(
+    _DUTCH_ARTICLES_AND_DETERMINERS,
+    _ENGLISH_ARTICLES_AND_DETERMINERS,
+    _INDIRECT_OBJECT_POSSESSIVE_DETERMINERS,
+)
+_INDIRECT_OBJECT_MODIFIERS = frozenset(
+    (
+        "best beste dear dierbaar dierbare faithful good goed goede great "
+        "groot grote heilig heilige holy lief lieve new nieuw nieuwe trouw "
+        "trouwe very zeer"
+    ).split()
+)
+_TRANSFER_AND_COMMUNICATION_VERBS = frozenset(
+    (
+        "breng brengen brengt bracht brachten gebracht geef geven geeft gaf "
+        "gaven gegeven schenk schenken schenkt schonk schonken geschonken "
+        "vertel vertellen vertelt vertelde vertelden verteld bring bringing "
+        "brings brought gave give given gives giving grant granted granting "
+        "grants tell telling tells told"
+    ).split()
+)
+_INDIRECT_OBJECT_CLAUSE_BOUNDARIES = frozenset(
+    (
+        "als although and as because but dat doordat en hoewel if maar of "
+        "omdat or since that though terwijl want wanneer when while"
+    ).split()
+)
+_INDIRECT_OBJECT_STOP_WORDS = frozenset().union(
+    _TRANSFER_AND_COMMUNICATION_VERBS,
+    _INDIRECT_OBJECT_CLAUSE_BOUNDARIES,
+    _INDIRECT_OBJECT_PREPOSITIONS,
+    _DUTCH_UW_FOLLOWING_VERBS,
+    "am are be been being is was were".split(),
 )
 _PROTECTED_LATIN_LEAD_WORDS = frozenset().union(
     _DUTCH_ARTICLES_AND_DETERMINERS,
@@ -285,6 +343,156 @@ def _protected_uw_noun_verb_spans(
     return tuple(spans)
 
 
+def _indirect_object_head_end(
+    tokens: tuple[tuple[str, int, int], ...],
+    start_index: int,
+) -> int | None:
+    """Return the exclusive end of up to two modifiers and one head."""
+    index = start_index
+    modifier_count = 0
+    while (
+        index < len(tokens)
+        and modifier_count < 2
+        and tokens[index][0].casefold() in _INDIRECT_OBJECT_MODIFIERS
+    ):
+        modifier_count += 1
+        index += 1
+    if (
+        index >= len(tokens)
+        or tokens[index][0].casefold() in _INDIRECT_OBJECT_STOP_WORDS
+    ):
+        return None
+    return index + 1
+
+
+def _indirect_object_noun_phrase_end(
+    tokens: tuple[tuple[str, int, int], ...],
+    start_index: int,
+) -> int | None:
+    """Return the exclusive end of one conservative recipient noun phrase."""
+    if start_index >= len(tokens):
+        return None
+    word = tokens[start_index][0].casefold()
+    if (
+        word in _INDIRECT_OBJECT_POSSESSIVE_DETERMINERS
+        and start_index + 1 < len(tokens)
+        and tokens[start_index + 1][0].casefold()
+        in _INDIRECT_OBJECT_MODIFIERS
+    ):
+        return _indirect_object_head_end(tokens, start_index + 1)
+    if word in _INDIRECT_OBJECT_PRONOUNS:
+        return start_index + 1
+    if word in _INDIRECT_OBJECT_DETERMINERS:
+        return _indirect_object_head_end(tokens, start_index + 1)
+    if word in _INDIRECT_OBJECT_STOP_WORDS:
+        return None
+    return start_index + 1
+
+
+def _indirect_object_complement_end(
+    tokens: tuple[tuple[str, int, int], ...],
+    start_index: int,
+) -> int | None:
+    """Return the bounded local content attached to an object pronoun."""
+    if (
+        start_index < len(tokens)
+        and tokens[start_index][0].casefold()
+        in _INDIRECT_OBJECT_DETERMINERS
+    ):
+        return _indirect_object_noun_phrase_end(tokens, start_index)
+    return _indirect_object_head_end(tokens, start_index)
+
+
+def _has_nearby_transfer_verb(
+    tokens: tuple[tuple[str, int, int], ...],
+    phrase_start_index: int,
+) -> bool:
+    """Recognise only a transfer verb in the preceding four local tokens."""
+    search_start = max(0, phrase_start_index - 4)
+    for index in range(phrase_start_index - 1, search_start - 1, -1):
+        word = tokens[index][0].casefold()
+        if word in _INDIRECT_OBJECT_CLAUSE_BOUNDARIES:
+            return False
+        if word in _TRANSFER_AND_COMMUNICATION_VERBS:
+            return True
+        if word in _INDIRECT_OBJECT_STOP_WORDS:
+            return False
+    return False
+
+
+def _has_direct_transfer_context(
+    tokens: tuple[tuple[str, int, int], ...],
+    phrase_start_index: int,
+) -> bool:
+    """Recognise an immediate transfer verb or one local inversion shape."""
+    if phrase_start_index == 0:
+        return False
+    previous_word = tokens[phrase_start_index - 1][0].casefold()
+    if previous_word in _TRANSFER_AND_COMMUNICATION_VERBS:
+        return True
+    return (
+        phrase_start_index >= 2
+        and previous_word in _INDIRECT_OBJECT_SUBJECT_PRONOUNS
+        and tokens[phrase_start_index - 2][0].casefold()
+        in _TRANSFER_AND_COMMUNICATION_VERBS
+    )
+
+
+def _protected_latin_indirect_object_spans(
+    tokens: tuple[tuple[str, int, int], ...],
+) -> tuple[tuple[int, int], ...]:
+    """Return bounded, exact-token recipient phrases near transfer verbs."""
+    spans: set[tuple[int, int]] = set()
+    for index, (token, start, _end) in enumerate(tokens):
+        word = token.casefold()
+        follows_indirect_preposition = (
+            index > 0
+            and tokens[index - 1][0].casefold()
+            in _INDIRECT_OBJECT_PREPOSITIONS
+        )
+        has_transfer_context = _has_nearby_transfer_verb(tokens, index)
+        has_direct_transfer_context = _has_direct_transfer_context(
+            tokens,
+            index,
+        )
+
+        phrase_end_index: int | None = None
+        if (
+            word in _INDIRECT_OBJECT_PREPOSITIONS
+            and (index == 0 or has_transfer_context)
+        ):
+            phrase_end_index = _indirect_object_noun_phrase_end(
+                tokens,
+                index + 1,
+            )
+        elif (
+            word in _INDIRECT_OBJECT_PRONOUNS
+            and not follows_indirect_preposition
+            and (index == 0 or has_direct_transfer_context)
+        ):
+            phrase_end_index = _indirect_object_complement_end(
+                tokens,
+                index + 1,
+            )
+        elif (
+            word in _INDIRECT_OBJECT_DETERMINERS
+            and not follows_indirect_preposition
+            and has_direct_transfer_context
+        ):
+            phrase_end_index = _indirect_object_head_end(
+                tokens,
+                index + 1,
+            )
+
+        if (
+            phrase_end_index is not None
+            and phrase_end_index > index + 1
+            and phrase_end_index < len(tokens)
+        ):
+            spans.add((start, tokens[phrase_end_index - 1][2]))
+    return tuple(sorted(spans))
+
+
 def _protected_grammatical_chain_spans(
     text: str,
     language: LanguageCode,
@@ -325,6 +533,7 @@ def _protected_grammatical_chain_spans(
         elif index - chain_start_index > 1:
             spans.append((tokens[chain_start_index][1], tokens[index - 1][2]))
     if language == "nl":
+        spans.extend(_protected_latin_indirect_object_spans(tokens))
         spans.extend(_protected_uw_noun_verb_spans(tokens))
     return tuple(spans)
 
