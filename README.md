@@ -25,8 +25,9 @@ Chinese word segmentation uses the free MIT-licensed `jieba` package in its stan
 6. Remove punctuation from title/lyric content and normalize whitespace.
 7. Apply the existing positional length limits and add at most one word-safe `//` per language when needed.
 8. Add structural section headings and, only for bilingual songs, `|`.
-9. Preview and edit the final result.
-10. Download a UTF-8 `.txt` file.
+9. Click **UPDATE** in the bottom-right action area to validate and apply the current output customizations.
+10. Review and, if needed, edit the refreshed final preview.
+11. Download a UTF-8 `.txt` file from the button directly below **UPDATE**.
 
 ## Single-language songs
 
@@ -106,7 +107,8 @@ For DOCX uploads, a paragraph containing a hyperlink object in this leading area
 - Each language receives at most one `//` per output row, even when the text is extremely long.
 - Apart from the required punctuation removal and whitespace normalization, lyric characters and words are never translated, rewritten, deleted, duplicated, or reordered.
 - Bilingual export is blocked until all detected sections and lines have valid reciprocal mappings. Single-language mode does not require mappings.
-- The final preview remains editable before download.
+- Changing the final output customizations leaves the last valid preview and download intact until **UPDATE** is clicked. A successful update regenerates the editable preview; a validation error leaves its previous valid contents unchanged.
+- The final preview remains editable before download, and the downloaded UTF-8 TXT always contains exactly the text currently shown in that preview.
 
 ## Run on Windows
 

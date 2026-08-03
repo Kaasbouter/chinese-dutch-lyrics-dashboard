@@ -28,7 +28,141 @@ from lyrics_dashboard.drag_mapping import (
 )
 from lyrics_dashboard.errors import LyricsDashboardError, PairingError
 from lyrics_dashboard.extractors import SUPPORTED_EXTENSIONS, extract_text
+from lyrics_dashboard.models import AlignmentPlan, ParsedLyrics
 from lyrics_dashboard.parser import parse_lyrics
+
+CHINESE_MAX_KEY = "custom_chinese_max_length"
+DUTCH_MAX_KEY = "custom_dutch_max_length"
+SWITCH_INDEX_KEY = "custom_switch_index"
+TITLE_SEPARATOR_KEY = "custom_title_separator"
+
+
+def _current_customization(
+    parsed: ParsedLyrics,
+    alignment_plan: AlignmentPlan | None,
+    fingerprint: str,
+) -> tuple[ConversionSettings, tuple[object, ...]]:
+    """Build settings and their signature from the live widget state."""
+    if parsed.mode == "single-language":
+        chinese_max = (
+            int(st.session_state[CHINESE_MAX_KEY])
+            if parsed.single_language == "zh"
+            else 10
+        )
+        dutch_max = (
+            int(st.session_state[DUTCH_MAX_KEY])
+            if parsed.single_language == "nl"
+            else 40
+        )
+        settings = ConversionSettings(
+            chinese_max_length=chinese_max,
+            dutch_max_length=dutch_max,
+        )
+        signature = (
+            fingerprint,
+            parsed.mode,
+            parsed.single_language,
+            chinese_max,
+            dutch_max,
+        )
+        return settings, signature
+
+    selected_switch = st.session_state[SWITCH_INDEX_KEY]
+    chinese_max = int(st.session_state[CHINESE_MAX_KEY])
+    dutch_max = int(st.session_state[DUTCH_MAX_KEY])
+    title_separator_choice = str(st.session_state[TITLE_SEPARATOR_KEY])
+    settings = ConversionSettings(
+        switch_index=selected_switch,
+        chinese_max_length=chinese_max,
+        dutch_max_length=dutch_max,
+        title_separator="|" if title_separator_choice.startswith("|") else " ",
+    )
+    signature = (
+        fingerprint,
+        repr(alignment_plan),
+        selected_switch,
+        chinese_max,
+        dutch_max,
+        title_separator_choice,
+    )
+    return settings, signature
+
+
+def _apply_customization_update(
+    parsed: ParsedLyrics,
+    alignment_plan: AlignmentPlan | None,
+    fingerprint: str,
+    *,
+    announce: bool = True,
+) -> bool:
+    """Validate and atomically apply one set of output customizations."""
+    settings, control_signature = _current_customization(
+        parsed,
+        alignment_plan,
+        fingerprint,
+    )
+    conversion_warnings: list[str] = []
+    try:
+        generated = convert_lyrics(
+            parsed,
+            alignment_plan,
+            settings,
+            warnings=conversion_warnings,
+        )
+    except (LyricsDashboardError, ValueError) as exc:
+        st.session_state["output_update_attempt_signature"] = control_signature
+        st.session_state["output_update_error"] = str(exc)
+        st.session_state["output_update_succeeded"] = False
+        return False
+
+    st.session_state["control_signature"] = control_signature
+    st.session_state["edited_output"] = generated
+    st.session_state["applied_conversion_warnings"] = tuple(conversion_warnings)
+    st.session_state["output_update_attempt_signature"] = control_signature
+    st.session_state["output_update_error"] = None
+    st.session_state["output_update_succeeded"] = announce
+    return True
+
+
+def _render_final_actions(
+    *,
+    parsed: ParsedLyrics,
+    alignment_plan: AlignmentPlan | None,
+    fingerprint: str,
+    control_signature: tuple[object, ...],
+    final_text: str,
+    output_name: str,
+) -> None:
+    """Render the final update and download actions together at bottom-right."""
+    _, action_column = st.columns([2, 1], gap="small")
+    with action_column:
+        st.button(
+            "UPDATE",
+            key="update_output",
+            type="primary",
+            width="stretch",
+            on_click=_apply_customization_update,
+            args=(parsed, alignment_plan, fingerprint),
+        )
+        st.download_button(
+            "Download final TXT",
+            data=encode_utf8_txt(final_text),
+            file_name=output_name,
+            mime="text/plain; charset=utf-8",
+            type="primary",
+            width="stretch",
+        )
+
+        if (
+            st.session_state.get("output_update_attempt_signature")
+            == control_signature
+        ):
+            update_error = st.session_state.get("output_update_error")
+            if update_error:
+                st.error(update_error)
+            elif st.session_state.get("output_update_succeeded"):
+                st.success("Output updated")
+
 
 DRAG_BOARD_STYLE = """
 .sortable-component, .sortable-component * {
@@ -191,6 +325,10 @@ if st.session_state.get("file_fingerprint") != fingerprint:
             "alignment_input_signature",
             "control_signature",
             "edited_output",
+            "applied_conversion_warnings",
+            "output_update_attempt_signature",
+            "output_update_error",
+            "output_update_succeeded",
         } or state_key.startswith(
             (
                 "manual_match_",
@@ -260,6 +398,7 @@ if single_language_mode:
                 max_value=40,
                 value=10,
                 step=1,
+                key=CHINESE_MAX_KEY,
             )
             dutch_max = 40
             normal_limit = int(chinese_max)
@@ -271,6 +410,7 @@ if single_language_mode:
                 max_value=100,
                 value=40,
                 step=1,
+                key=DUTCH_MAX_KEY,
             )
             normal_limit = int(dutch_max)
         st.caption(
@@ -282,35 +422,23 @@ if single_language_mode:
             f"{derive_first_side_limit(normal_limit)}."
         )
 
-    settings = ConversionSettings(
-        chinese_max_length=int(chinese_max),
-        dutch_max_length=int(dutch_max),
+    _, control_signature = _current_customization(
+        parsed,
+        None,
+        fingerprint,
     )
-    conversion_warnings: list[str] = []
-    try:
-        generated = convert_lyrics(
+    if "edited_output" not in st.session_state:
+        if not _apply_customization_update(
             parsed,
             None,
-            settings,
-            warnings=conversion_warnings,
-        )
-    except LyricsDashboardError as exc:
-        st.error(str(exc))
-        st.stop()
+            fingerprint,
+            announce=False,
+        ):
+            st.error(st.session_state["output_update_error"])
+            st.stop()
 
-    for warning in conversion_warnings:
+    for warning in st.session_state.get("applied_conversion_warnings", ()):
         st.warning(warning)
-
-    control_signature = (
-        fingerprint,
-        parsed.mode,
-        parsed.single_language,
-        int(chinese_max),
-        int(dutch_max),
-    )
-    if st.session_state.get("control_signature") != control_signature:
-        st.session_state["control_signature"] = control_signature
-        st.session_state["edited_output"] = generated
 
     st.subheader("3. Preview and download the TXT")
     st.caption(
@@ -330,13 +458,13 @@ if single_language_mode:
         flags=re.UNICODE,
     ).strip("_")
     output_name = f"{safe_stem or 'converted_lyrics'}_formatted.txt"
-    st.download_button(
-        "Download final TXT",
-        data=encode_utf8_txt(final_text),
-        file_name=output_name,
-        mime="text/plain; charset=utf-8",
-        type="primary",
-        width="stretch",
+    _render_final_actions(
+        parsed=parsed,
+        alignment_plan=None,
+        fingerprint=fingerprint,
+        control_signature=control_signature,
+        final_text=final_text,
+        output_name=output_name,
     )
     st.stop()
 
@@ -764,6 +892,7 @@ selected_switch = st.selectbox(
     index=default_position,
     format_func=lambda value: option_labels[value],
     help="The selected section and every section after it use Dutch|Chinese. Earlier sections use Chinese|Dutch.",
+    key=SWITCH_INDEX_KEY,
 )
 
 with st.expander("Splitting rules", expanded=False):
@@ -775,6 +904,7 @@ with st.expander("Splitting rules", expanded=False):
             max_value=40,
             value=10,
             step=1,
+            key=CHINESE_MAX_KEY,
         )
     with c2:
         dutch_max = st.number_input(
@@ -783,11 +913,13 @@ with st.expander("Splitting rules", expanded=False):
             max_value=100,
             value=40,
             step=1,
+            key=DUTCH_MAX_KEY,
         )
     title_separator_choice = st.selectbox(
         "Title language separator",
         options=["Space — matches the example", "| — same as lyric lines"],
         index=0,
+        key=TITLE_SEPARATOR_KEY,
     )
     st.caption(
         "Punctuation is removed before measuring. Long Chinese uses the nearest balanced local "
@@ -799,39 +931,23 @@ with st.expander("Splitting rules", expanded=False):
         f"{derive_first_side_limit(int(dutch_max))}/{int(dutch_max)}."
     )
 
-settings = ConversionSettings(
-    switch_index=selected_switch,
-    chinese_max_length=int(chinese_max),
-    dutch_max_length=int(dutch_max),
-    title_separator="|" if title_separator_choice.startswith("|") else " ",
+_, control_signature = _current_customization(
+    parsed,
+    alignment_plan,
+    fingerprint,
 )
-
-conversion_warnings: list[str] = []
-try:
-    generated = convert_lyrics(
+if "edited_output" not in st.session_state:
+    if not _apply_customization_update(
         parsed,
         alignment_plan,
-        settings,
-        warnings=conversion_warnings,
-    )
-except LyricsDashboardError as exc:
-    st.error(str(exc))
-    st.stop()
+        fingerprint,
+        announce=False,
+    ):
+        st.error(st.session_state["output_update_error"])
+        st.stop()
 
-for warning in conversion_warnings:
+for warning in st.session_state.get("applied_conversion_warnings", ()):
     st.warning(warning)
-
-control_signature = (
-    fingerprint,
-    repr(alignment_plan),
-    selected_switch,
-    int(chinese_max),
-    int(dutch_max),
-    title_separator_choice,
-)
-if st.session_state.get("control_signature") != control_signature:
-    st.session_state["control_signature"] = control_signature
-    st.session_state["edited_output"] = generated
 
 st.subheader("5. Preview and download the TXT")
 st.caption(
@@ -847,11 +963,11 @@ final_text = st.text_area(
 safe_stem = re.sub(r"[^\w\-]+", "_", Path(uploaded_file.name).stem, flags=re.UNICODE).strip("_")
 output_name = f"{safe_stem or 'converted_lyrics'}_formatted.txt"
 
-st.download_button(
-    "Download final TXT",
-    data=encode_utf8_txt(final_text),
-    file_name=output_name,
-    mime="text/plain; charset=utf-8",
-    type="primary",
-    width="stretch",
+_render_final_actions(
+    parsed=parsed,
+    alignment_plan=alignment_plan,
+    fingerprint=fingerprint,
+    control_signature=control_signature,
+    final_text=final_text,
+    output_name=output_name,
 )
