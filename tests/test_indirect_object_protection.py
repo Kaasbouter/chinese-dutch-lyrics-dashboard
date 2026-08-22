@@ -618,16 +618,27 @@ def test_single_language_preview_and_utf8_download_are_identical() -> None:
     preview = app.text_area[0].value
     assert preview == expected
     assert preview == app.session_state["edited_output"]
-    assert encode_utf8_txt(preview).decode("utf-8") == preview
+    assert app.session_state["saved_final_output"] == preview
+    assert encode_utf8_txt(app.session_state["saved_final_output"]).decode(
+        "utf-8"
+    ) == preview
 
     edited_preview = preview.replace("Grace", "New Grace")
     app.text_area[0].set_value(edited_preview).run(timeout=10)
 
     assert app.text_area[0].value == edited_preview
     assert app.session_state["edited_output"] == edited_preview
-    assert encode_utf8_txt(app.text_area[0].value).decode("utf-8") == (
-        edited_preview
+    assert app.session_state["saved_final_output"] == preview
+
+    next(button for button in app.button if button.label == "UPDATE").click().run(
+        timeout=10
     )
+
+    assert app.text_area[0].value == edited_preview
+    assert app.session_state["saved_final_output"] == edited_preview
+    assert encode_utf8_txt(app.session_state["saved_final_output"]).decode(
+        "utf-8"
+    ) == edited_preview
     download_buttons = app.get("download_button")
     assert len(download_buttons) == 1
     assert download_buttons[0].label == "Download final TXT"

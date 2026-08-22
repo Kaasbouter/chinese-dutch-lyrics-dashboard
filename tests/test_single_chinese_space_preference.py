@@ -316,16 +316,27 @@ def test_chinese_only_editable_preview_matches_utf8_txt_export() -> None:
     assert preview == expected
     assert "|" not in preview
     assert app.session_state["edited_output"] == preview
-    assert encode_utf8_txt(preview).decode("utf-8") == preview
+    assert app.session_state["saved_final_output"] == preview
+    assert encode_utf8_txt(app.session_state["saved_final_output"]).decode(
+        "utf-8"
+    ) == preview
 
     edited_preview = preview.replace("歌名", "新歌名")
     app.text_area[0].set_value(edited_preview).run(timeout=10)
 
     assert app.text_area[0].value == edited_preview
     assert app.session_state["edited_output"] == edited_preview
-    assert encode_utf8_txt(app.text_area[0].value).decode("utf-8") == (
-        edited_preview
+    assert app.session_state["saved_final_output"] == preview
+
+    next(button for button in app.button if button.label == "UPDATE").click().run(
+        timeout=10
     )
+
+    assert app.text_area[0].value == edited_preview
+    assert app.session_state["saved_final_output"] == edited_preview
+    assert encode_utf8_txt(app.session_state["saved_final_output"]).decode(
+        "utf-8"
+    ) == edited_preview
     download_buttons = app.get("download_button")
     assert len(download_buttons) == 1
     assert download_buttons[0].label == "Download final TXT"

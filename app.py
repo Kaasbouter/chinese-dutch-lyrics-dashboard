@@ -35,6 +35,10 @@ CHINESE_MAX_KEY = "custom_chinese_max_length"
 DUTCH_MAX_KEY = "custom_dutch_max_length"
 SWITCH_INDEX_KEY = "custom_switch_index"
 TITLE_SEPARATOR_KEY = "custom_title_separator"
+GENERATED_OUTPUT_KEY = "generated_output"
+EDITABLE_PREVIEW_KEY = "editable_preview"
+EDITED_OUTPUT_WIDGET_KEY = "edited_output"
+SAVED_FINAL_OUTPUT_KEY = "saved_final_output"
 
 
 def _current_customization(
@@ -88,14 +92,15 @@ def _current_customization(
     return settings, signature
 
 
-def _apply_customization_update(
+def _generate_conversion_output(
     parsed: ParsedLyrics,
     alignment_plan: AlignmentPlan | None,
     fingerprint: str,
     *,
+    initialize_saved_output: bool,
     announce: bool = True,
 ) -> bool:
-    """Validate and atomically apply one set of output customizations."""
+    """Generate output without conflating conversion with manual preview saves."""
     settings, control_signature = _current_customization(
         parsed,
         alignment_plan,
@@ -110,30 +115,116 @@ def _apply_customization_update(
             warnings=conversion_warnings,
         )
     except (LyricsDashboardError, ValueError) as exc:
-        st.session_state["output_update_attempt_signature"] = control_signature
-        st.session_state["output_update_error"] = str(exc)
-        st.session_state["output_update_succeeded"] = False
+        st.session_state["generation_attempt_signature"] = control_signature
+        st.session_state["generation_error"] = str(exc)
+        st.session_state["generation_succeeded"] = False
         return False
 
     st.session_state["control_signature"] = control_signature
-    st.session_state["edited_output"] = generated
+    st.session_state[GENERATED_OUTPUT_KEY] = generated
+    st.session_state[EDITABLE_PREVIEW_KEY] = generated
+    st.session_state[EDITED_OUTPUT_WIDGET_KEY] = generated
+    if initialize_saved_output or SAVED_FINAL_OUTPUT_KEY not in st.session_state:
+        st.session_state[SAVED_FINAL_OUTPUT_KEY] = generated
     st.session_state["applied_conversion_warnings"] = tuple(conversion_warnings)
-    st.session_state["output_update_attempt_signature"] = control_signature
-    st.session_state["output_update_error"] = None
-    st.session_state["output_update_succeeded"] = announce
+    st.session_state["generation_attempt_signature"] = control_signature
+    st.session_state["generation_error"] = None
+    st.session_state["generation_succeeded"] = announce
+    st.session_state["preview_save_succeeded"] = False
     return True
 
 
-def _render_final_actions(
+def _regenerate_conversion_output(
+    parsed: ParsedLyrics,
+    alignment_plan: AlignmentPlan | None,
+    fingerprint: str,
+) -> None:
+    """Deliberately rebuild the editable preview while keeping the saved TXT stable."""
+    _generate_conversion_output(
+        parsed,
+        alignment_plan,
+        fingerprint,
+        initialize_saved_output=False,
+    )
+
+
+def _capture_editable_preview() -> None:
+    """Keep a non-widget copy of the current draft when the textarea changes."""
+    st.session_state[EDITABLE_PREVIEW_KEY] = st.session_state[
+        EDITED_OUTPUT_WIDGET_KEY
+    ]
+    st.session_state["generation_succeeded"] = False
+    st.session_state["preview_save_succeeded"] = False
+
+
+def _save_editable_preview() -> None:
+    """Save the exact current textarea value without invoking conversion logic."""
+    current_preview = st.session_state[EDITED_OUTPUT_WIDGET_KEY]
+    st.session_state[EDITABLE_PREVIEW_KEY] = current_preview
+    st.session_state[SAVED_FINAL_OUTPUT_KEY] = current_preview
+    st.session_state["generation_succeeded"] = False
+    st.session_state["preview_save_succeeded"] = True
+
+
+def _render_regeneration_action(
     *,
     parsed: ParsedLyrics,
     alignment_plan: AlignmentPlan | None,
     fingerprint: str,
     control_signature: tuple[object, ...],
-    final_text: str,
+) -> None:
+    """Offer an explicit conversion action separate from saving manual edits."""
+    st.button(
+        "REGENERATE AUTOMATIC PREVIEW",
+        key="regenerate_output",
+        width="stretch",
+        help=(
+            "Rebuild from the current mappings and splitting settings. This replaces the "
+            "editable preview; click UPDATE afterward to save it for download."
+        ),
+        on_click=_regenerate_conversion_output,
+        args=(parsed, alignment_plan, fingerprint),
+    )
+
+    if st.session_state.get("generation_attempt_signature") == control_signature:
+        generation_error = st.session_state.get("generation_error")
+        if generation_error:
+            st.error(generation_error)
+        elif st.session_state.get("generation_succeeded"):
+            st.success("Preview regenerated; click UPDATE to save it")
+    elif st.session_state.get("control_signature") != control_signature:
+        st.info(
+            "The conversion settings or mappings have changed. Regenerate the automatic "
+            "preview when you want to replace the current editable draft."
+        )
+
+
+def _render_editable_preview(*, subheader: str, help_text: str) -> None:
+    """Render the state-managed preview without resetting its current draft."""
+    if EDITED_OUTPUT_WIDGET_KEY not in st.session_state:
+        st.session_state[EDITED_OUTPUT_WIDGET_KEY] = st.session_state[
+            EDITABLE_PREVIEW_KEY
+        ]
+
+    st.subheader(subheader)
+    st.caption(help_text)
+    st.text_area(
+        "Converted lyrics",
+        key=EDITED_OUTPUT_WIDGET_KEY,
+        height=560,
+        label_visibility="collapsed",
+        on_change=_capture_editable_preview,
+    )
+    st.session_state[EDITABLE_PREVIEW_KEY] = st.session_state[
+        EDITED_OUTPUT_WIDGET_KEY
+    ]
+
+
+def _render_final_actions(
+    *,
     output_name: str,
 ) -> None:
-    """Render the final update and download actions together at bottom-right."""
+    """Render the exact-save action directly above the saved TXT download."""
     _, action_column = st.columns([2, 1], gap="small")
     with action_column:
         st.button(
@@ -141,27 +232,19 @@ def _render_final_actions(
             key="update_output",
             type="primary",
             width="stretch",
-            on_click=_apply_customization_update,
-            args=(parsed, alignment_plan, fingerprint),
+            on_click=_save_editable_preview,
         )
         st.download_button(
             "Download final TXT",
-            data=encode_utf8_txt(final_text),
+            data=encode_utf8_txt(st.session_state[SAVED_FINAL_OUTPUT_KEY]),
             file_name=output_name,
             mime="text/plain; charset=utf-8",
             type="primary",
             width="stretch",
         )
 
-        if (
-            st.session_state.get("output_update_attempt_signature")
-            == control_signature
-        ):
-            update_error = st.session_state.get("output_update_error")
-            if update_error:
-                st.error(update_error)
-            elif st.session_state.get("output_update_succeeded"):
-                st.success("Output updated")
+        if st.session_state.get("preview_save_succeeded"):
+            st.success("Changes saved")
 
 
 DRAG_BOARD_STYLE = """
@@ -324,11 +407,15 @@ if st.session_state.get("file_fingerprint") != fingerprint:
             "alignment_fingerprint",
             "alignment_input_signature",
             "control_signature",
-            "edited_output",
+            GENERATED_OUTPUT_KEY,
+            EDITABLE_PREVIEW_KEY,
+            EDITED_OUTPUT_WIDGET_KEY,
+            SAVED_FINAL_OUTPUT_KEY,
             "applied_conversion_warnings",
-            "output_update_attempt_signature",
-            "output_update_error",
-            "output_update_succeeded",
+            "generation_attempt_signature",
+            "generation_error",
+            "generation_succeeded",
+            "preview_save_succeeded",
         } or state_key.startswith(
             (
                 "manual_match_",
@@ -427,28 +514,32 @@ if single_language_mode:
         None,
         fingerprint,
     )
-    if "edited_output" not in st.session_state:
-        if not _apply_customization_update(
+    if GENERATED_OUTPUT_KEY not in st.session_state:
+        if not _generate_conversion_output(
             parsed,
             None,
             fingerprint,
+            initialize_saved_output=True,
             announce=False,
         ):
-            st.error(st.session_state["output_update_error"])
+            st.error(st.session_state["generation_error"])
             st.stop()
 
     for warning in st.session_state.get("applied_conversion_warnings", ()):
         st.warning(warning)
 
-    st.subheader("3. Preview and download the TXT")
-    st.caption(
-        "The preview is editable. Check all `//` placements before downloading."
+    _render_regeneration_action(
+        parsed=parsed,
+        alignment_plan=None,
+        fingerprint=fingerprint,
+        control_signature=control_signature,
     )
-    final_text = st.text_area(
-        "Converted lyrics",
-        key="edited_output",
-        height=560,
-        label_visibility="collapsed",
+    _render_editable_preview(
+        subheader="3. Preview and download the TXT",
+        help_text=(
+            "The preview is editable. Check all `//` placements, then click UPDATE to save "
+            "the exact text for download."
+        ),
     )
 
     safe_stem = re.sub(
@@ -459,11 +550,6 @@ if single_language_mode:
     ).strip("_")
     output_name = f"{safe_stem or 'converted_lyrics'}_formatted.txt"
     _render_final_actions(
-        parsed=parsed,
-        alignment_plan=None,
-        fingerprint=fingerprint,
-        control_signature=control_signature,
-        final_text=final_text,
         output_name=output_name,
     )
     st.stop()
@@ -936,38 +1022,37 @@ _, control_signature = _current_customization(
     alignment_plan,
     fingerprint,
 )
-if "edited_output" not in st.session_state:
-    if not _apply_customization_update(
+if GENERATED_OUTPUT_KEY not in st.session_state:
+    if not _generate_conversion_output(
         parsed,
         alignment_plan,
         fingerprint,
+        initialize_saved_output=True,
         announce=False,
     ):
-        st.error(st.session_state["output_update_error"])
+        st.error(st.session_state["generation_error"])
         st.stop()
 
 for warning in st.session_state.get("applied_conversion_warnings", ()):
     st.warning(warning)
 
-st.subheader("5. Preview and download the TXT")
-st.caption(
-    "The preview is editable. Check the translation pairs and all `//` placements before downloading."
+_render_regeneration_action(
+    parsed=parsed,
+    alignment_plan=alignment_plan,
+    fingerprint=fingerprint,
+    control_signature=control_signature,
 )
-final_text = st.text_area(
-    "Converted lyrics",
-    key="edited_output",
-    height=560,
-    label_visibility="collapsed",
+_render_editable_preview(
+    subheader="5. Preview and download the TXT",
+    help_text=(
+        "The preview is editable. Check the translation pairs and all `//` placements, then "
+        "click UPDATE to save the exact text for download."
+    ),
 )
 
 safe_stem = re.sub(r"[^\w\-]+", "_", Path(uploaded_file.name).stem, flags=re.UNICODE).strip("_")
 output_name = f"{safe_stem or 'converted_lyrics'}_formatted.txt"
 
 _render_final_actions(
-    parsed=parsed,
-    alignment_plan=alignment_plan,
-    fingerprint=fingerprint,
-    control_signature=control_signature,
-    final_text=final_text,
     output_name=output_name,
 )

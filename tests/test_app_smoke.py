@@ -12,7 +12,6 @@ from lyrics_dashboard.alignment import (
     suggest_manual_selections,
 )
 from lyrics_dashboard.converter import encode_utf8_txt
-from lyrics_dashboard.errors import PairingError
 from lyrics_dashboard.extractors import extract_text
 from lyrics_dashboard.parser import parse_lyrics
 
@@ -100,17 +99,32 @@ def test_dashboard_sample_drag_layout_validates_end_to_end() -> None:
     assert encode_utf8_txt(preview_text).decode("utf-8") == preview_text
 
 
-def test_update_is_the_only_customization_action_and_refreshes_preview_and_txt(
+def test_update_saves_exact_manual_preview_without_regenerating(
     monkeypatch,
 ) -> None:
     download_payloads = _record_download_payloads(monkeypatch)
+    conversion_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    original_convert_lyrics = converter_module.convert_lyrics
+
+    def recording_convert_lyrics(*args, **kwargs):
+        conversion_calls.append((args, kwargs))
+        return original_convert_lyrics(*args, **kwargs)
+
+    monkeypatch.setattr(
+        converter_module,
+        "convert_lyrics",
+        recording_convert_lyrics,
+    )
     app, uploaded_source = _single_language_app()
 
     splitting_rules = next(
         expander for expander in app.expander if expander.label == "Splitting rules"
     )
     assert not splitting_rules.button
-    assert [button.label for button in app.button] == ["UPDATE"]
+    assert sum(button.label == "UPDATE" for button in app.button) == 1
+    assert sum(
+        button.label == "REGENERATE AUTOMATIC PREVIEW" for button in app.button
+    ) == 1
 
     action_column = next(
         column
@@ -125,48 +139,93 @@ def test_update_is_the_only_customization_action_and_refreshes_preview_and_txt(
     initial_preview = app.text_area[0].value
     initial_fingerprint = app.session_state["file_fingerprint"]
     assert download_payloads[-1] == encode_utf8_txt(initial_preview)
+    assert "A short song" in initial_preview
 
-    latin_maximum = next(
-        number_input
-        for number_input in app.number_input
-        if number_input.label == "Maximum Latin-script characters per segment"
+    exact_manual_text = (
+        "  [Manual Title?!]  \n"
+        "Inserted intro | exact//divider\n\n"
+        "[Verse manually renamed]\n"
+        "Groot is Uw trouw o Heer\n"
+        "Keep  double   spaces, punctuation!  \n"
     )
-    latin_maximum.set_value(30).run(timeout=10)
+    assert "A short song" not in exact_manual_text
+    conversion_calls.clear()
 
-    assert app.text_area[0].value == initial_preview
-    assert download_payloads[-1] == encode_utf8_txt(initial_preview)
-
-    latin_maximum = next(
-        number_input
-        for number_input in app.number_input
-        if number_input.label == "Maximum Latin-script characters per segment"
-    )
-    latin_maximum.set_value(20)
+    # Submit the new widget value and click in one interaction. This proves the
+    # callback reads the current textarea value rather than an older draft.
+    app.text_area[0].set_value(exact_manual_text)
     next(button for button in app.button if button.label == "UPDATE").click().run(
         timeout=10
     )
 
-    updated_preview = app.text_area[0].value
-    assert updated_preview != initial_preview
-    assert "We sing together//for the Lord" in updated_preview
-    assert updated_preview == app.session_state["edited_output"]
-    assert download_payloads[-1] == encode_utf8_txt(updated_preview)
-    assert any(message.value == "Output updated" for message in app.success)
+    assert not app.exception
+    assert conversion_calls == []
+    assert app.text_area[0].value == exact_manual_text
+    assert app.session_state["generated_output"] == initial_preview
+    assert app.session_state["editable_preview"] == exact_manual_text
+    assert app.session_state["edited_output"] == exact_manual_text
+    assert app.session_state["saved_final_output"] == exact_manual_text
+    assert download_payloads[-1] == encode_utf8_txt(exact_manual_text)
+    assert any(message.value == "Changes saved" for message in app.success)
     assert app.file_uploader[0].value.name == "english-only.txt"
     assert app.file_uploader[0].value.getvalue() == uploaded_source
     assert app.session_state["file_fingerprint"] == initial_fingerprint
     assert not app.multiselect
-    assert [button.label for button in app.button] == ["UPDATE"]
+    assert sum(button.label == "UPDATE" for button in app.button) == 1
 
 
-def test_invalid_update_preserves_last_valid_preview_and_download(
+def test_unsaved_edits_keep_last_saved_txt_and_repeated_update_can_save_empty_text(
     monkeypatch,
 ) -> None:
     download_payloads = _record_download_payloads(monkeypatch)
-    app, uploaded_source = _single_language_app()
-    previous_preview = app.text_area[0].value
-    previous_signature = app.session_state["control_signature"]
-    previous_download = encode_utf8_txt(previous_preview)
+    app, _uploaded_source = _single_language_app()
+    initial_preview = app.text_area[0].value
+    initial_download = encode_utf8_txt(initial_preview)
+    first_edit = "[First saved draft]\nOne inserted line | with//markers\n"
+
+    app.text_area[0].set_value(first_edit).run(timeout=10)
+
+    assert app.text_area[0].value == first_edit
+    assert app.session_state["editable_preview"] == first_edit
+    assert app.session_state["saved_final_output"] == initial_preview
+    assert download_payloads[-1] == initial_download
+    assert not any(message.value == "Changes saved" for message in app.success)
+
+    next(button for button in app.button if button.label == "UPDATE").click().run(
+        timeout=10
+    )
+
+    assert not app.exception
+    assert app.text_area[0].value == first_edit
+    assert app.session_state["saved_final_output"] == first_edit
+    assert download_payloads[-1] == encode_utf8_txt(first_edit)
+
+    app.text_area[0].set_value("").run(timeout=10)
+
+    assert app.text_area[0].value == ""
+    assert app.session_state["editable_preview"] == ""
+    assert app.session_state["saved_final_output"] == first_edit
+    assert download_payloads[-1] == encode_utf8_txt(first_edit)
+
+    next(button for button in app.button if button.label == "UPDATE").click().run(
+        timeout=10
+    )
+
+    assert not app.exception
+    assert app.text_area[0].value == ""
+    assert app.session_state["editable_preview"] == ""
+    assert app.session_state["saved_final_output"] == ""
+    assert download_payloads[-1] == b""
+    assert any(message.value == "Changes saved" for message in app.success)
+
+
+def test_explicit_regeneration_applies_settings_but_stays_unsaved_until_update(
+    monkeypatch,
+) -> None:
+    download_payloads = _record_download_payloads(monkeypatch)
+    app, _uploaded_source = _single_language_app()
+    initial_preview = app.text_area[0].value
+    initial_download = encode_utf8_txt(initial_preview)
 
     latin_maximum = next(
         number_input
@@ -175,27 +234,86 @@ def test_invalid_update_preserves_last_valid_preview_and_download(
     )
     latin_maximum.set_value(20).run(timeout=10)
 
-    def reject_customization(*args, **kwargs):
-        raise PairingError("Invalid customization")
+    assert app.text_area[0].value == initial_preview
+    assert app.session_state["saved_final_output"] == initial_preview
+    assert download_payloads[-1] == initial_download
+    assert any(
+        "settings or mappings have changed" in message.value
+        for message in app.info
+    )
 
-    monkeypatch.setattr(converter_module, "convert_lyrics", reject_customization)
-    app.run(timeout=10)
+    next(
+        button
+        for button in app.button
+        if button.label == "REGENERATE AUTOMATIC PREVIEW"
+    ).click().run(timeout=10)
+
+    regenerated_preview = app.text_area[0].value
+    assert not app.exception
+    assert regenerated_preview != initial_preview
+    assert "We sing together//for the Lord" in regenerated_preview
+    assert app.session_state["generated_output"] == regenerated_preview
+    assert app.session_state["editable_preview"] == regenerated_preview
+    assert app.session_state["saved_final_output"] == initial_preview
+    assert download_payloads[-1] == initial_download
+    assert any(
+        message.value == "Preview regenerated; click UPDATE to save it"
+        for message in app.success
+    )
+
     next(button for button in app.button if button.label == "UPDATE").click().run(
         timeout=10
     )
 
+    assert app.text_area[0].value == regenerated_preview
+    assert app.session_state["saved_final_output"] == regenerated_preview
+    assert download_payloads[-1] == encode_utf8_txt(regenerated_preview)
+    assert any(message.value == "Changes saved" for message in app.success)
+
+
+def test_new_upload_initializes_generated_editable_saved_and_download_states(
+    monkeypatch,
+) -> None:
+    download_payloads = _record_download_payloads(monkeypatch)
+    app, _uploaded_source = _single_language_app()
+    first_fingerprint = app.session_state["file_fingerprint"]
+    stale_manual_marker = "MANUAL TEXT FROM THE PREVIOUS FILE"
+
+    app.text_area[0].set_value(stale_manual_marker)
+    next(button for button in app.button if button.label == "UPDATE").click().run(
+        timeout=10
+    )
+    assert download_payloads[-1] == encode_utf8_txt(stale_manual_marker)
+
+    new_source = (
+        "[Title]\n"
+        "Second Song\n\n"
+        "Verse 1\n"
+        "A completely new lyric\n"
+    ).encode("utf-8")
+    app.file_uploader[0].set_value(
+        ("second-song.txt", new_source, "text/plain")
+    ).run(timeout=10)
+
+    initialized_preview = app.text_area[0].value
     assert not app.exception
-    assert any(error.value == "Invalid customization" for error in app.error)
-    assert not any(message.value == "Output updated" for message in app.success)
-    assert app.text_area[0].value == previous_preview
-    assert app.session_state["edited_output"] == previous_preview
-    assert app.session_state["control_signature"] == previous_signature
-    assert download_payloads[-1] == previous_download
-    assert app.file_uploader[0].value.getvalue() == uploaded_source
-    assert latin_maximum.value == 20
+    assert app.session_state["file_fingerprint"] != first_fingerprint
+    assert app.file_uploader[0].value.name == "second-song.txt"
+    assert app.file_uploader[0].value.getvalue() == new_source
+    assert stale_manual_marker not in initialized_preview
+    assert "Second Song" in initialized_preview
+    assert "A completely new lyric" in initialized_preview
+    assert app.session_state["generated_output"] == initialized_preview
+    assert app.session_state["editable_preview"] == initialized_preview
+    assert app.session_state["edited_output"] == initialized_preview
+    assert app.session_state["saved_final_output"] == initialized_preview
+    assert download_payloads[-1] == encode_utf8_txt(initialized_preview)
 
 
-def test_bilingual_update_preserves_manual_state_and_language_order_selection() -> None:
+def test_bilingual_update_preserves_manual_state_language_order_and_controls(
+    monkeypatch,
+) -> None:
+    download_payloads = _record_download_payloads(monkeypatch)
     app = _uploaded_sample_app()
     next(
         button
@@ -221,12 +339,6 @@ def test_bilingual_update_preserves_manual_state_and_language_order_selection() 
     initial_preview = app.text_area[0].value
     initial_fingerprint = app.session_state["file_fingerprint"]
     uploaded_source = app.file_uploader[0].value.getvalue()
-    preserved_state = {
-        key: repr(value)
-        for key, value in app.session_state.filtered_state.items()
-        if key == "alignment_plan"
-        or key.startswith(("manual_match_", "manual_lines_", "manual_drag_"))
-    }
 
     language_order = next(
         selectbox
@@ -246,20 +358,67 @@ def test_bilingual_update_preserves_manual_state_and_language_order_selection() 
     )
     title_separator.set_value(title_separator.options[1]).run(timeout=10)
 
+    chinese_maximum = next(
+        number_input
+        for number_input in app.number_input
+        if number_input.label == "Maximum Chinese characters per segment"
+    )
+    chinese_maximum.set_value(12).run(timeout=10)
+    dutch_maximum = next(
+        number_input
+        for number_input in app.number_input
+        if number_input.label == "Maximum Dutch characters per segment"
+    )
+    dutch_maximum.set_value(48).run(timeout=10)
+
+    preserved_state = {
+        key: repr(value)
+        for key, value in app.session_state.filtered_state.items()
+        if key
+        in {
+            "alignment_plan",
+            "alignment_fingerprint",
+            "alignment_input_signature",
+        }
+        or key.startswith(
+            ("manual_match_", "manual_lines_", "manual_drag_", "manual_join_")
+        )
+    }
+    preserved_multiselects = {
+        item.label: tuple(item.value) for item in app.multiselect
+    }
+    exact_manual_text = (
+        "  [Handmatige titel?!]\n"
+        "Handmatige//tekst | Groot is Uw trouw o Heer\n"
+        "[Nieuw refrein]\n"
+        "Bewaar  alle   spaties!  \n"
+    )
+
     assert app.text_area[0].value == initial_preview
+    app.text_area[0].set_value(exact_manual_text)
     next(button for button in app.button if button.label == "UPDATE").click().run(
         timeout=10
     )
 
-    updated_preview = app.text_area[0].value
     current_state = {
         key: repr(value)
         for key, value in app.session_state.filtered_state.items()
-        if key == "alignment_plan"
-        or key.startswith(("manual_match_", "manual_lines_", "manual_drag_"))
+        if key
+        in {
+            "alignment_plan",
+            "alignment_fingerprint",
+            "alignment_input_signature",
+        }
+        or key.startswith(
+            ("manual_match_", "manual_lines_", "manual_drag_", "manual_join_")
+        )
     }
-    assert updated_preview != initial_preview
-    assert "|" in updated_preview.splitlines()[1]
+    assert not app.exception
+    assert app.text_area[0].value == exact_manual_text
+    assert app.session_state["generated_output"] == initial_preview
+    assert app.session_state["editable_preview"] == exact_manual_text
+    assert app.session_state["saved_final_output"] == exact_manual_text
+    assert download_payloads[-1] == encode_utf8_txt(exact_manual_text)
     assert current_state == preserved_state
     assert app.session_state["file_fingerprint"] == initial_fingerprint
     assert app.file_uploader[0].value.getvalue() == uploaded_source
@@ -273,9 +432,26 @@ def test_bilingual_update_preserves_manual_state_and_language_order_selection() 
         for selectbox in app.selectbox
         if selectbox.label == "Title language separator"
     ).value.endswith("same as lyric lines")
+    assert next(
+        number_input
+        for number_input in app.number_input
+        if number_input.label == "Maximum Chinese characters per segment"
+    ).value == 12
+    assert next(
+        number_input
+        for number_input in app.number_input
+        if number_input.label == "Maximum Dutch characters per segment"
+    ).value == 48
+    assert {
+        item.label: tuple(item.value) for item in app.multiselect
+    } == preserved_multiselects
     assert app.multiselect
     assert app.get("component_instance")
-    assert any("|" in line for line in updated_preview.splitlines()[3:])
+    assert any(
+        selectbox.label == "Switch to Dutch first starting at"
+        for selectbox in app.selectbox
+    )
+    assert any(message.value == "Changes saved" for message in app.success)
 
 
 def test_step_three_keeps_one_vertical_drop_box_per_suggested_mapping_entry() -> None:
@@ -403,9 +579,11 @@ def test_dashboard_shows_non_blocking_chinese_character_fallback_warning() -> No
         if number_input.label == "Maximum Chinese characters per segment"
     )
     chinese_maximum.set_value(4).run(timeout=10)
-    next(button for button in app.button if button.label == "UPDATE").click().run(
-        timeout=10
-    )
+    next(
+        button
+        for button in app.button
+        if button.label == "REGENERATE AUTOMATIC PREVIEW"
+    ).click().run(timeout=10)
 
     assert not app.exception
     assert any(
@@ -466,7 +644,18 @@ def test_single_language_dashboard_skips_bilingual_controls_and_exports_preview(
     app.text_area[0].set_value(edited_preview).run(timeout=10)
     assert app.text_area[0].value == edited_preview
     assert app.session_state["edited_output"] == edited_preview
-    assert encode_utf8_txt(app.text_area[0].value).decode("utf-8") == edited_preview
+    assert app.session_state["saved_final_output"] == preview_text
+
+    next(button for button in app.button if button.label == "UPDATE").click().run(
+        timeout=10
+    )
+
+    assert app.text_area[0].value == edited_preview
+    assert app.session_state["saved_final_output"] == edited_preview
+    assert encode_utf8_txt(app.session_state["saved_final_output"]).decode(
+        "utf-8"
+    ) == edited_preview
+    assert any(message.value == "Changes saved" for message in app.success)
 
     download_buttons = app.get("download_button")
     assert len(download_buttons) == 1
@@ -539,7 +728,13 @@ def test_leading_link_never_reaches_manual_controls_preview_or_txt() -> None:
 
     assert app.text_area[0].value == edited_preview
     assert app.session_state["edited_output"] == edited_preview
+    assert app.session_state["saved_final_output"] == generated_preview
     assert forbidden_marker not in edited_preview.lower()
-    downloaded_txt = encode_utf8_txt(app.text_area[0].value)
+
+    next(button for button in app.button if button.label == "UPDATE").click().run(
+        timeout=10
+    )
+
+    downloaded_txt = encode_utf8_txt(app.session_state["saved_final_output"])
     assert downloaded_txt.decode("utf-8") == edited_preview
     assert forbidden_marker.encode("utf-8") not in downloaded_txt.lower()
