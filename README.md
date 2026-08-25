@@ -28,7 +28,7 @@ Chinese word segmentation uses the free MIT-licensed `jieba` package in its stan
 9. When you deliberately want changed mappings, language order, or splitting settings to replace the draft, click **REGENERATE AUTOMATIC PREVIEW**.
 10. Review and manually edit the preview as needed.
 11. Click **UPDATE** to save the exact current preview text without rerunning the converter.
-12. Download the last saved UTF-8 `.txt` file from the button directly below **UPDATE**.
+12. Download the last saved UTF-8 `.txt` file from the button directly below **UPDATE**. Downloading does not rerun the app.
 
 ## Single-language songs
 
@@ -110,8 +110,9 @@ For DOCX uploads, a paragraph containing a hyperlink object in this leading area
 - Bilingual export is blocked until all detected sections and lines have valid reciprocal mappings. Single-language mode does not require mappings.
 - Generated output, the editable preview draft, and the saved final output are stored separately. A new upload initializes all three from a new conversion.
 - Changing mappings, language order, or splitting settings does not overwrite the current preview. **REGENERATE AUTOMATIC PREVIEW** deliberately rebuilds the draft from those settings, while the last saved download remains unchanged until **UPDATE** is clicked.
-- **UPDATE** is a save action only: it preserves the textarea contents exactly as entered and does not rerun punctuation removal, splitting, formatting, translation, or any other conversion rule.
-- The downloaded UTF-8 TXT always contains the most recently saved preview. Further unsaved textarea edits do not change the download until **UPDATE** is clicked again.
+- **UPDATE** is an unrestricted save action only: it copies the textarea's exact current string—including arbitrary structural edits or an intentionally empty value—into the saved final output without parsing, validation, trimming, normalization, or conversion.
+- The downloaded TXT is built in memory directly from the most recently saved final output, encoded as UTF-8, and served as `text/plain; charset=utf-8`. No temporary output file is written, and clicking **Download final TXT** does not rerun the app.
+- Typing alone changes only the editable draft. Until **UPDATE** is clicked, the download continues to contain the prior saved value.
 
 ## Run on Windows
 

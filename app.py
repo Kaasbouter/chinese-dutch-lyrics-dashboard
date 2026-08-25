@@ -225,6 +225,7 @@ def _render_final_actions(
     output_name: str,
 ) -> None:
     """Render the exact-save action directly above the saved TXT download."""
+    download_data = encode_utf8_txt(st.session_state[SAVED_FINAL_OUTPUT_KEY])
     _, action_column = st.columns([2, 1], gap="small")
     with action_column:
         st.button(
@@ -236,9 +237,10 @@ def _render_final_actions(
         )
         st.download_button(
             "Download final TXT",
-            data=encode_utf8_txt(st.session_state[SAVED_FINAL_OUTPUT_KEY]),
+            data=download_data,
             file_name=output_name,
             mime="text/plain; charset=utf-8",
+            on_click="ignore",
             type="primary",
             width="stretch",
         )

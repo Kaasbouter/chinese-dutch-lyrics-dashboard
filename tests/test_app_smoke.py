@@ -62,6 +62,18 @@ def _record_download_payloads(monkeypatch) -> list[bytes]:
     return payloads
 
 
+def _record_download_calls(monkeypatch) -> list[dict[str, object]]:
+    calls: list[dict[str, object]] = []
+    original_download_button = st.download_button
+
+    def recording_download_button(*args, **kwargs):
+        calls.append(dict(kwargs))
+        return original_download_button(*args, **kwargs)
+
+    monkeypatch.setattr(st, "download_button", recording_download_button)
+    return calls
+
+
 def test_dashboard_initial_render() -> None:
     app = AppTest.from_file(str(APP_PATH), default_timeout=10).run()
 
@@ -172,6 +184,116 @@ def test_update_saves_exact_manual_preview_without_regenerating(
     assert app.session_state["file_fingerprint"] == initial_fingerprint
     assert not app.multiselect
     assert sum(button.label == "UPDATE" for button in app.button) == 1
+
+
+def test_structural_manual_edits_remain_exact_across_successive_updates(
+    monkeypatch,
+) -> None:
+    download_payloads = _record_download_payloads(monkeypatch)
+    app, _uploaded_source = _single_language_app()
+    generated_output = app.session_state["generated_output"]
+    previous_saved = app.session_state["saved_final_output"]
+
+    assert "[Verse 1]" in generated_output
+
+    deleted_verse = (
+        "[Chorus 1]\n"
+        "Chinese text|Dutch//text\n"
+        "Second Chinese|Second Dutch\n\n"
+        "[Verse 2]\n"
+        "Third Chinese|Third Dutch\n"
+        "Fourth Chinese|Fourth Dutch\n"
+    )
+    deleted_rows = (
+        "[Chorus 1]\n"
+        "Chinese text|Dutch//text\n\n"
+        "[Verse 2]\n"
+        "Fourth Chinese|Fourth Dutch\n"
+    )
+    unchanged_second_half = "\n\n[Verse 2]\nFourth Chinese|Fourth Dutch\n"
+    first_half_edited = (
+        "[Refrain manually renamed]\n"
+        "First-half edit//kept|Dutch changed"
+    ) + unchanged_second_half
+    second_half_edited = (
+        "[Refrain manually renamed]\n"
+        "First-half edit//kept|Dutch changed\n\n"
+        "[Verse 2]\n"
+        "Only the second half is now different|with//new markers\n"
+    )
+    changed_slashes = second_half_edited.replace(
+        "with//new markers",
+        "with////manually changed markers",
+    )
+    removed_markers = (
+        "[Refrain manually renamed]\n"
+        "No bilingual separator remains\n\n"
+        "[Verse 2]\n"
+        "No split marker remains either\n"
+    )
+    reordered_headings = (
+        "[Outro moved first]\n"
+        "Free text before all former sections\n\n"
+        "[Custom section name]\n"
+        "One manually retained row\n"
+    )
+    arbitrary_text = (
+        "  This is intentionally not converter-shaped.  \n"
+        "Blank lines, punctuation?! and  double   spaces stay.\n\n\n"
+        "No heading is required.\n"
+    )
+    edits = (
+        deleted_verse,
+        deleted_rows,
+        first_half_edited,
+        second_half_edited,
+        changed_slashes,
+        removed_markers,
+        reordered_headings,
+        arbitrary_text,
+        "",
+    )
+
+    for exact_manual_text in edits:
+        app.text_area[0].set_value(exact_manual_text).run(timeout=10)
+
+        assert app.text_area[0].value == exact_manual_text
+        assert app.session_state["editable_preview"] == exact_manual_text
+        assert app.session_state["saved_final_output"] == previous_saved
+        assert download_payloads[-1] == encode_utf8_txt(previous_saved)
+
+        next(
+            button for button in app.button if button.label == "UPDATE"
+        ).click().run(timeout=10)
+
+        assert not app.exception
+        assert app.text_area[0].value == exact_manual_text
+        assert app.session_state["generated_output"] == generated_output
+        assert app.session_state["editable_preview"] == exact_manual_text
+        assert app.session_state["edited_output"] == exact_manual_text
+        assert app.session_state["saved_final_output"] == exact_manual_text
+        assert download_payloads[-1] == encode_utf8_txt(exact_manual_text)
+        previous_saved = exact_manual_text
+
+    assert "[Verse 1]" not in app.session_state["saved_final_output"]
+    assert app.session_state["saved_final_output"] == ""
+    assert download_payloads[-1] == b""
+
+
+def test_download_uses_saved_utf8_data_without_triggering_a_rerun(
+    monkeypatch,
+) -> None:
+    download_calls = _record_download_calls(monkeypatch)
+    app, _uploaded_source = _single_language_app()
+    saved_output = app.session_state["saved_final_output"]
+    download_button = app.get("download_button")[0]
+    latest_call = download_calls[-1]
+
+    assert latest_call["data"] == encode_utf8_txt(saved_output)
+    assert latest_call["file_name"] == "english-only_formatted.txt"
+    assert latest_call["mime"] == "text/plain; charset=utf-8"
+    assert latest_call["on_click"] == "ignore"
+    assert download_button.proto.ignore_rerun is True
 
 
 def test_unsaved_edits_keep_last_saved_txt_and_repeated_update_can_save_empty_text(
