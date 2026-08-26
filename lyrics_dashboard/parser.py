@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from dataclasses import replace
 
 from .errors import PairingError, ParseError
 from .models import Language, ParsedLyrics, Section
@@ -204,6 +205,85 @@ def _validate_single_language_candidate(
             "The title contains bilingual evidence, but only one lyric language block was "
             "detected. Check that the second language has recognizable section headings."
         )
+
+
+def apply_section_languages(
+    parsed: ParsedLyrics,
+    assignments: Mapping[int, Language],
+) -> ParsedLyrics:
+    """Apply a complete set of manual languages keyed by original section index.
+
+    The parser's detected result remains untouched. The returned immutable copy changes
+    only section languages plus the derived mode and language-block warnings.
+    """
+    original_indices = [section.original_index for section in parsed.sections]
+    expected_indices = set(original_indices)
+    if len(expected_indices) != len(original_indices):
+        raise ValueError(
+            "Cannot apply language assignments because section original_index values "
+            "are not unique."
+        )
+
+    supplied_indices = set(assignments)
+    missing_indices = expected_indices - supplied_indices
+    extra_indices = supplied_indices - expected_indices
+    if missing_indices or extra_indices:
+        details: list[str] = []
+        if missing_indices:
+            details.append(
+                "missing original_index values "
+                + ", ".join(repr(index) for index in sorted(missing_indices, key=repr))
+            )
+        if extra_indices:
+            details.append(
+                "unexpected original_index values "
+                + ", ".join(repr(index) for index in sorted(extra_indices, key=repr))
+            )
+        raise ValueError(
+            "Language assignments must contain exactly one entry for every section; "
+            + "; ".join(details)
+            + "."
+        )
+
+    invalid_assignments = [
+        (index, assignments[index])
+        for index in original_indices
+        if assignments[index] not in ("zh", "nl")
+    ]
+    if invalid_assignments:
+        formatted = ", ".join(
+            f"{index!r}={language!r}" for index, language in invalid_assignments
+        )
+        raise ValueError(
+            "Section languages must be 'zh' or 'nl'; invalid assignments: "
+            f"{formatted}."
+        )
+
+    updated_sections = tuple(
+        replace(section, language=assignments[section.original_index])
+        for section in parsed.sections
+    )
+    effective_languages = {section.language for section in updated_sections}
+    if len(effective_languages) == 1:
+        single_language = next(iter(effective_languages))
+        _validate_single_language_candidate(
+            list(updated_sections),
+            parsed.raw_title,
+            single_language,
+        )
+        return replace(
+            parsed,
+            sections=updated_sections,
+            warnings=(),
+            mode="single-language",
+        )
+
+    return replace(
+        parsed,
+        sections=updated_sections,
+        warnings=tuple(_validate_language_blocks(list(updated_sections))),
+        mode="bilingual",
+    )
 
 
 def parse_lyrics(text: str) -> ParsedLyrics:

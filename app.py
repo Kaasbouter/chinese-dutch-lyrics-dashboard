@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import MutableMapping
 from pathlib import Path
 
 import pandas as pd
@@ -14,6 +15,7 @@ from lyrics_dashboard.alignment import (
     parse_line_spec,
     suggest_manual_line_groups,
     suggest_manual_selections,
+    validate_alignment_plan,
 )
 from lyrics_dashboard.converter import (
     ConversionSettings,
@@ -29,7 +31,7 @@ from lyrics_dashboard.drag_mapping import (
 from lyrics_dashboard.errors import LyricsDashboardError, PairingError
 from lyrics_dashboard.extractors import SUPPORTED_EXTENSIONS, extract_text
 from lyrics_dashboard.models import AlignmentPlan, ParsedLyrics
-from lyrics_dashboard.parser import parse_lyrics
+from lyrics_dashboard.parser import apply_section_languages, parse_lyrics
 
 CHINESE_MAX_KEY = "custom_chinese_max_length"
 DUTCH_MAX_KEY = "custom_dutch_max_length"
@@ -39,6 +41,287 @@ GENERATED_OUTPUT_KEY = "generated_output"
 EDITABLE_PREVIEW_KEY = "editable_preview"
 EDITED_OUTPUT_WIDGET_KEY = "edited_output"
 SAVED_FINAL_OUTPUT_KEY = "saved_final_output"
+AUTOMATIC_LANGUAGES_KEY = "automatic_section_languages"
+PENDING_LANGUAGES_KEY = "pending_section_languages"
+EFFECTIVE_LANGUAGES_KEY = "effective_section_languages"
+LANGUAGE_EDITOR_KEY = "source_language_editor"
+PRESERVED_ALIGNMENT_KEY = "preserved_alignment_after_language_refresh"
+ALIGNMENT_CURRENT_KEY = "alignment_plan_matches_current_inputs"
+
+LANGUAGE_LABEL_BY_CODE = {
+    "zh": "Chinese",
+    "nl": "Dutch/English or Latin script",
+}
+LANGUAGE_CODE_BY_LABEL = {
+    label: code for code, label in LANGUAGE_LABEL_BY_CODE.items()
+}
+READ_ONLY_LANGUAGE_COLUMNS = ("Index", "Section", "Lines", "Opening text")
+
+DragLayout = tuple[
+    tuple[tuple[int, ...], ...],
+    tuple[tuple[tuple[int, int], ...], ...],
+    tuple[tuple[int, int], ...],
+]
+
+
+def _section_language_assignments(parsed: ParsedLyrics) -> dict[int, str]:
+    """Return stable per-document language assignments keyed by source index."""
+    return {
+        section.original_index: section.language
+        for section in parsed.sections
+    }
+
+
+def _alignment_draft(
+    plan: AlignmentPlan,
+    source_index: int,
+) -> tuple[tuple[int, ...], DragLayout] | None:
+    """Recover a directional drag-board draft from a reciprocal validated plan."""
+    try:
+        alignment = plan.for_section(source_index)
+    except KeyError:
+        return None
+
+    assignments = tuple(
+        tuple(
+            (reference.section_index, line_index)
+            for reference in group.translation_references
+            for line_index in reference.line_indices
+        )
+        for group in alignment.aligned_lines
+    )
+    layout: DragLayout = (
+        tuple(group.source_line_indices for group in alignment.aligned_lines),
+        assignments,
+        (),
+    )
+    return alignment.counterpart_section_indices, layout
+
+
+def _clear_source_mapping_state(
+    state: MutableMapping[str, object],
+    source_index: int,
+) -> bool:
+    """Remove only the mapping widgets owned by one former Chinese source."""
+    match_key = f"manual_match_{source_index}"
+    layout_key = f"manual_drag_layout_{source_index}"
+    had_mapping = bool(state.get(match_key)) or layout_key in state
+    exact_keys = {
+        match_key,
+        f"manual_lines_{source_index}",
+        f"manual_lines_base_{source_index}",
+        f"manual_lines_signature_{source_index}",
+        f"manual_drag_selection_{source_index}",
+        f"manual_drag_board_{source_index}",
+        f"manual_drag_board_signature_{source_index}",
+        f"manual_drag_revision_{source_index}",
+        f"manual_drag_reset_{source_index}",
+        f"manual_drag_pool_{source_index}",
+        layout_key,
+    }
+    component_prefix = f"manual_drag_component_{source_index}_"
+    join_prefix = f"manual_join_{source_index}"
+    for state_key in list(state):
+        if (
+            state_key in exact_keys
+            or state_key.startswith(component_prefix)
+            or state_key.startswith(join_prefix)
+        ):
+            state.pop(state_key, None)
+    return had_mapping
+
+
+def _normalize_drag_layout(value: object) -> DragLayout | None:
+    """Normalize persisted canonical drag references without trusting display strings."""
+    if not isinstance(value, (tuple, list)) or len(value) != 3:
+        return None
+    raw_groups, raw_assignments, raw_unassigned = value
+    try:
+        groups = tuple(tuple(int(item) for item in group) for group in raw_groups)
+        assignments = tuple(
+            tuple((int(section), int(line)) for section, line in assignment)
+            for assignment in raw_assignments
+        )
+        unassigned = tuple(
+            (int(section), int(line)) for section, line in raw_unassigned
+        )
+    except (TypeError, ValueError):
+        return None
+    if len(groups) != len(assignments):
+        return None
+    return groups, assignments, unassigned
+
+
+def _reconcile_language_mapping_state(
+    state: MutableMapping[str, object],
+    previous: ParsedLyrics,
+    updated: ParsedLyrics,
+    fingerprint: str,
+) -> bool:
+    """Preserve compatible mapping drafts and remove only cross-language conflicts."""
+    previous_languages = _section_language_assignments(previous)
+    updated_languages = _section_language_assignments(updated)
+    if previous_languages == updated_languages:
+        return False
+
+    mappings_reset = False
+    stored_plan = state.get("alignment_plan")
+    previous_plan = (
+        stored_plan
+        if isinstance(stored_plan, AlignmentPlan)
+        and bool(state.get(ALIGNMENT_CURRENT_KEY))
+        else None
+    )
+    plan_is_valid = False
+    if isinstance(previous_plan, AlignmentPlan):
+        try:
+            validate_alignment_plan(updated, previous_plan)
+        except LyricsDashboardError:
+            mappings_reset = True
+            for state_key in (
+                "alignment_plan",
+                "alignment_fingerprint",
+                "alignment_input_signature",
+                PRESERVED_ALIGNMENT_KEY,
+                ALIGNMENT_CURRENT_KEY,
+            ):
+                state.pop(state_key, None)
+        else:
+            plan_is_valid = True
+            state[PRESERVED_ALIGNMENT_KEY] = True
+    elif isinstance(stored_plan, AlignmentPlan):
+        for state_key in (
+            "alignment_plan",
+            "alignment_fingerprint",
+            "alignment_input_signature",
+            PRESERVED_ALIGNMENT_KEY,
+            ALIGNMENT_CURRENT_KEY,
+        ):
+            state.pop(state_key, None)
+
+    previous_chinese = {
+        index for index, language in previous_languages.items() if language == "zh"
+    }
+    updated_chinese = {
+        index for index, language in updated_languages.items() if language == "zh"
+    }
+    for source_index in sorted(previous_chinese - updated_chinese):
+        removed_directional_state = _clear_source_mapping_state(
+            state,
+            source_index,
+        )
+        if removed_directional_state and not plan_is_valid:
+            mappings_reset = True
+
+    for source_index in sorted(updated_chinese):
+        match_key = f"manual_match_{source_index}"
+        layout_key = f"manual_drag_layout_{source_index}"
+        plan_draft = (
+            _alignment_draft(previous_plan, source_index)
+            if isinstance(previous_plan, AlignmentPlan)
+            else None
+        )
+
+        has_preserved_selection = match_key in state or plan_draft is not None
+        if match_key in state:
+            raw_selected = state.get(match_key)
+            selected = (
+                tuple(
+                    dict.fromkeys(
+                        int(index)
+                        for index in raw_selected
+                        if isinstance(index, int)
+                    )
+                )
+                if isinstance(raw_selected, (tuple, list))
+                else ()
+            )
+        elif plan_draft is not None:
+            selected = tuple(plan_draft[0])
+        else:
+            selected = ()
+
+        valid_selected = tuple(
+            index
+            for index in selected
+            if 0 <= index < len(updated.sections)
+            and updated.sections[index].language == "nl"
+        )
+        if valid_selected != selected:
+            mappings_reset = True
+        if has_preserved_selection:
+            state[match_key] = list(valid_selected)
+
+        layout = _normalize_drag_layout(state.get(layout_key))
+        if layout is None and plan_draft is not None:
+            layout = plan_draft[1]
+
+        if layout is not None:
+            source_groups, assignments, unassigned = layout
+            allowed_sections = set(valid_selected)
+
+            def compatible(reference: tuple[int, int]) -> bool:
+                section_index, line_index = reference
+                return (
+                    section_index in allowed_sections
+                    and 0 <= line_index < len(updated.sections[section_index].lines)
+                    and updated.sections[section_index].language == "nl"
+                )
+
+            filtered_assignments = tuple(
+                tuple(reference for reference in assignment if compatible(reference))
+                for assignment in assignments
+            )
+            filtered_unassigned = tuple(
+                reference for reference in unassigned if compatible(reference)
+            )
+            old_references = tuple(
+                reference
+                for assignment in assignments
+                for reference in assignment
+            ) + tuple(unassigned)
+            new_references = tuple(
+                reference
+                for assignment in filtered_assignments
+                for reference in assignment
+            ) + filtered_unassigned
+            if new_references != old_references:
+                mappings_reset = True
+
+            preserved_layout: DragLayout = (
+                source_groups,
+                filtered_assignments,
+                filtered_unassigned,
+            )
+            state[layout_key] = preserved_layout
+            state[f"manual_lines_base_{source_index}"] = [
+                {"Chinese line(s)": format_line_spec(group)}
+                for group in source_groups
+            ]
+            state.pop(f"manual_lines_{source_index}", None)
+
+            selection_signature = (
+                fingerprint,
+                source_index,
+                valid_selected,
+            )
+            state[f"manual_lines_signature_{source_index}"] = selection_signature
+            state[f"manual_drag_selection_{source_index}"] = selection_signature
+
+        old_revision = int(
+            state.get(f"manual_drag_revision_{source_index}", -1)
+        )
+        for state_key in list(state):
+            if state_key.startswith(f"manual_drag_component_{source_index}_"):
+                state.pop(state_key, None)
+        state.pop(f"manual_drag_board_{source_index}", None)
+        state.pop(f"manual_drag_board_signature_{source_index}", None)
+        state[f"manual_drag_revision_{source_index}"] = old_revision + 1
+
+    if plan_is_valid:
+        state["alignment_plan"] = previous_plan
+        state["alignment_fingerprint"] = fingerprint
+    return mappings_reset
 
 
 def _current_customization(
@@ -66,6 +349,7 @@ def _current_customization(
             fingerprint,
             parsed.mode,
             parsed.single_language,
+            tuple(section.language for section in parsed.sections),
             chinese_max,
             dutch_max,
         )
@@ -84,6 +368,7 @@ def _current_customization(
     signature = (
         fingerprint,
         repr(alignment_plan),
+        tuple(section.language for section in parsed.sections),
         selected_switch,
         chinese_max,
         dutch_max,
@@ -408,7 +693,14 @@ if st.session_state.get("file_fingerprint") != fingerprint:
             "alignment_plan",
             "alignment_fingerprint",
             "alignment_input_signature",
+            ALIGNMENT_CURRENT_KEY,
             "control_signature",
+            AUTOMATIC_LANGUAGES_KEY,
+            PENDING_LANGUAGES_KEY,
+            EFFECTIVE_LANGUAGES_KEY,
+            LANGUAGE_EDITOR_KEY,
+            PRESERVED_ALIGNMENT_KEY,
+            "refresh_section_languages",
             GENERATED_OUTPUT_KEY,
             EDITABLE_PREVIEW_KEY,
             EDITED_OUTPUT_WIDGET_KEY,
@@ -432,10 +724,99 @@ if st.session_state.get("file_fingerprint") != fingerprint:
 
 try:
     source_text = extract_text(uploaded_file.name, file_bytes)
-    parsed = parse_lyrics(source_text)
+    automatic_parsed = parse_lyrics(source_text)
 except LyricsDashboardError as exc:
     st.error(str(exc))
     st.stop()
+
+automatic_languages = _section_language_assignments(automatic_parsed)
+st.session_state[AUTOMATIC_LANGUAGES_KEY] = dict(automatic_languages)
+if PENDING_LANGUAGES_KEY not in st.session_state:
+    st.session_state[PENDING_LANGUAGES_KEY] = dict(automatic_languages)
+if EFFECTIVE_LANGUAGES_KEY not in st.session_state:
+    st.session_state[EFFECTIVE_LANGUAGES_KEY] = dict(automatic_languages)
+
+try:
+    parsed = apply_section_languages(
+        automatic_parsed,
+        st.session_state[EFFECTIVE_LANGUAGES_KEY],
+    )
+except (LyricsDashboardError, ValueError) as exc:
+    st.error(f"The saved language assignments are invalid: {exc}")
+    st.stop()
+
+section_rows = [
+    {
+        "Index": section.original_index,
+        "Section": f"[{section.label}]",
+        "Language": LANGUAGE_LABEL_BY_CODE[section.language],
+        "Lines": len(section.lines),
+        "Opening text": section.lines[0],
+    }
+    for section in automatic_parsed.sections
+]
+with st.expander("Detected source sections", expanded=False):
+    if automatic_parsed.mode == "bilingual":
+        st.caption(
+            "Detected languages can be corrected manually below. Click REFRESH after making changes."
+        )
+        edited_section_rows = st.data_editor(
+            pd.DataFrame(section_rows),
+            key=LANGUAGE_EDITOR_KEY,
+            num_rows="fixed",
+            width="stretch",
+            hide_index=True,
+            disabled=list(READ_ONLY_LANGUAGE_COLUMNS),
+            column_config={
+                "Language": st.column_config.SelectboxColumn(
+                    "Language",
+                    options=list(LANGUAGE_CODE_BY_LABEL),
+                    required=True,
+                    help=(
+                        "Chinese, or the existing Dutch/English/Latin-script language group."
+                    ),
+                ),
+            },
+        )
+        pending_languages = {
+            int(row["Index"]): LANGUAGE_CODE_BY_LABEL[str(row["Language"])]
+            for row in edited_section_rows.to_dict("records")
+        }
+        st.session_state[PENDING_LANGUAGES_KEY] = pending_languages
+
+        if st.button(
+            "REFRESH",
+            key="refresh_section_languages",
+            width="stretch",
+        ):
+            try:
+                updated_parsed = apply_section_languages(
+                    automatic_parsed,
+                    pending_languages,
+                )
+            except (LyricsDashboardError, ValueError) as exc:
+                st.error(f"Language assignments were not applied: {exc}")
+            else:
+                mappings_reset = _reconcile_language_mapping_state(
+                    st.session_state,
+                    parsed,
+                    updated_parsed,
+                    fingerprint,
+                )
+                st.session_state[EFFECTIVE_LANGUAGES_KEY] = dict(
+                    pending_languages
+                )
+                parsed = updated_parsed
+                if mappings_reset:
+                    st.info(
+                        "Language assignments updated. Some incompatible mappings were reset."
+                    )
+    else:
+        st.dataframe(
+            pd.DataFrame(section_rows),
+            width="stretch",
+            hide_index=True,
+        )
 
 for warning in parsed.warnings:
     st.warning(warning)
@@ -443,6 +824,14 @@ for warning in parsed.warnings:
 chinese_sections = [section for section in parsed.sections if section.language == "zh"]
 dutch_sections = [section for section in parsed.sections if section.language == "nl"]
 single_language_mode = parsed.mode == "single-language"
+if (
+    not single_language_mode
+    and len(chinese_sections) == len(dutch_sections)
+):
+    st.success(
+        f"The document has {len(chinese_sections)} Chinese sections and "
+        f"{len(dutch_sections)} Dutch/English or Latin-script sections."
+    )
 detected_language_label = (
     "Chinese"
     if parsed.single_language == "zh"
@@ -455,27 +844,6 @@ section_to_code = {
     section.original_index: f"D{position}"
     for position, section in enumerate(dutch_sections, start=1)
 }
-
-section_rows = [
-    {
-        "Index": section.original_index,
-        "Section": f"[{section.label}]",
-        "Language": (
-            "Chinese"
-            if section.language == "zh"
-            else (
-                "Dutch/English or Latin script"
-                if single_language_mode
-                else "Dutch"
-            )
-        ),
-        "Lines": len(section.lines),
-        "Opening text": section.lines[0],
-    }
-    for section in parsed.sections
-]
-with st.expander("Detected source sections", expanded=False):
-    st.dataframe(pd.DataFrame(section_rows), width="stretch", hide_index=True)
 
 if single_language_mode:
     st.subheader("2. Configure single-language splitting")
@@ -574,12 +942,13 @@ for source in chinese_sections:
     default = [
         index for index in suggestions.get(source.original_index, []) if index in candidate_indices
     ]
+    match_key = f"manual_match_{source.original_index}"
     selections[source.original_index] = st.multiselect(
         f"Dutch translation for [{source.label}] — {source.lines[0]}",
         options=candidate_indices,
-        default=default,
+        default=default if match_key not in st.session_state else None,
         format_func=lambda index, labels=labels: labels[index],
-        key=f"manual_match_{source.original_index}",
+        key=match_key,
         help="Select more than one Dutch section when one Chinese section is translated across multiple sections.",
     )
 
@@ -627,7 +996,9 @@ for source in chinese_sections:
     selection_signature = (fingerprint, source_index, selected)
     selection_key = f"manual_drag_selection_{source_index}"
     editor_key = f"manual_lines_{source_index}"
+    editor_base_key = f"manual_lines_base_{source_index}"
     editor_signature_key = f"manual_lines_signature_{source_index}"
+    layout_state_key = f"manual_drag_layout_{source_index}"
     board_state_key = f"manual_drag_board_{source_index}"
     board_signature_key = f"manual_drag_board_signature_{source_index}"
     board_revision_key = f"manual_drag_revision_{source_index}"
@@ -639,7 +1010,9 @@ for source in chinese_sections:
                 st.session_state.pop(state_key, None)
         for state_key in (
             editor_key,
+            editor_base_key,
             editor_signature_key,
+            layout_state_key,
             board_state_key,
             board_signature_key,
             board_revision_key,
@@ -675,7 +1048,10 @@ for source in chinese_sections:
         ]
         if st.session_state.get(editor_signature_key) != selection_signature:
             st.session_state.pop(editor_key, None)
+            st.session_state.pop(editor_base_key, None)
             st.session_state[editor_signature_key] = selection_signature
+        if editor_base_key not in st.session_state:
+            st.session_state[editor_base_key] = default_range_rows
 
         st.markdown("**Mapping rows**")
         st.caption(
@@ -683,7 +1059,10 @@ for source in chinese_sections:
             "Add or remove rows when needed; Dutch references are handled only by dragging below."
         )
         edited_ranges = st.data_editor(
-            pd.DataFrame(default_range_rows, columns=["Chinese line(s)"]),
+            pd.DataFrame(
+                st.session_state[editor_base_key],
+                columns=["Chinese line(s)"],
+            ),
             key=editor_key,
             num_rows="dynamic",
             hide_index=True,
@@ -764,6 +1143,47 @@ for source in chinese_sections:
             }
             for header, assignment in zip(target_headers, suggested_assignments)
         )
+        initial_containers = default_containers
+        preserved_layout = _normalize_drag_layout(
+            st.session_state.get(layout_state_key)
+        )
+        if preserved_layout is not None:
+            preserved_groups, preserved_assignments, preserved_unassigned = (
+                preserved_layout
+            )
+            preserved_references = tuple(
+                reference
+                for assignment in preserved_assignments
+                for reference in assignment
+            ) + tuple(preserved_unassigned)
+            if (
+                preserved_groups == source_groups
+                and len(preserved_assignments) == len(source_groups)
+                and len(preserved_references) == len(set(preserved_references))
+                and set(preserved_references) == set(reference_to_token)
+            ):
+                initial_containers = [
+                    {
+                        "header": unassigned_header,
+                        "items": [
+                            reference_to_token[reference]
+                            for reference in preserved_unassigned
+                        ],
+                    }
+                ]
+                initial_containers.extend(
+                    {
+                        "header": header,
+                        "items": [
+                            reference_to_token[reference]
+                            for reference in assignment
+                        ],
+                    }
+                    for header, assignment in zip(
+                        target_headers,
+                        preserved_assignments,
+                    )
+                )
         pool_containers: list[dict[str, object]] = [
             {
                 "header": unassigned_header,
@@ -775,9 +1195,14 @@ for source in chinese_sections:
             for header in target_headers
         )
 
-        board_signature = ("vertical_mapping_rows_v2", selection_signature, source_groups)
+        board_signature = (
+            "vertical_mapping_rows_v3",
+            selection_signature,
+            source_groups,
+            tuple(section_to_code.items()),
+        )
         if st.session_state.get(board_signature_key) != board_signature:
-            st.session_state[board_state_key] = default_containers
+            st.session_state[board_state_key] = initial_containers
             st.session_state[board_signature_key] = board_signature
             st.session_state[board_revision_key] = (
                 int(st.session_state.get(board_revision_key, -1)) + 1
@@ -832,6 +1257,7 @@ for source in chinese_sections:
             assignments,
             unassigned,
         )
+        st.session_state[layout_state_key] = drag_layout_by_source[source_index]
 
         empty_targets = [
             format_line_spec(group)
@@ -894,9 +1320,19 @@ if st.button("Validate these manual matches", type="primary", width="stretch"):
 
 alignment_plan = st.session_state.get("alignment_plan")
 if (
-    st.session_state.get("alignment_fingerprint") != fingerprint
-    or st.session_state.get("alignment_input_signature") != alignment_input_signature
+    st.session_state.pop(PRESERVED_ALIGNMENT_KEY, False)
+    and isinstance(alignment_plan, AlignmentPlan)
 ):
+    st.session_state["alignment_fingerprint"] = fingerprint
+    st.session_state["alignment_input_signature"] = alignment_input_signature
+
+alignment_is_current = (
+    isinstance(alignment_plan, AlignmentPlan)
+    and st.session_state.get("alignment_fingerprint") == fingerprint
+    and st.session_state.get("alignment_input_signature") == alignment_input_signature
+)
+st.session_state[ALIGNMENT_CURRENT_KEY] = alignment_is_current
+if not alignment_is_current:
     alignment_plan = None
 
 if alignment_plan is None:

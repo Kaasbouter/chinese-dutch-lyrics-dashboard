@@ -19,16 +19,33 @@ Chinese word segmentation uses the free MIT-licensed `jieba` package in its stan
 
 1. Upload a supported source file.
 2. Review the detected sections and automatic bilingual or single-language mode.
-3. For bilingual songs, select the true Dutch translation section or sections for each Chinese section.
-4. For bilingual songs, review the numbered reference panels, edit Chinese ranges, drag Dutch cards into the matching rows, and validate reciprocal coverage.
-5. For bilingual songs, choose where the output changes from `Chinese|Dutch` to `Dutch|Chinese`.
-6. Remove punctuation from title/lyric content and normalize whitespace.
-7. Apply the existing positional length limits and add at most one word-safe `//` per language when needed.
-8. Add structural section headings and, only for bilingual songs, `|`.
-9. When you deliberately want changed mappings, language order, or splitting settings to replace the draft, click **REGENERATE AUTOMATIC PREVIEW**.
-10. Review and manually edit the preview as needed.
-11. Click **UPDATE** to save the exact current preview text without rerunning the converter.
-12. Download the last saved UTF-8 `.txt` file from the button directly below **UPDATE**. Downloading does not rerun the app.
+3. For an automatically detected bilingual upload, correct any section in the editable **Language** column and click **REFRESH** to apply all pending corrections together.
+4. Select the true Dutch translation section or sections for each Chinese section.
+5. Review the numbered reference panels, edit Chinese ranges, drag Dutch cards into the matching rows, and validate reciprocal coverage.
+6. Choose where the output changes from `Chinese|Dutch` to `Dutch|Chinese`.
+7. Remove punctuation from title/lyric content and normalize whitespace.
+8. Apply the existing positional length limits and add at most one word-safe `//` per language when needed.
+9. Add structural section headings and, only for bilingual songs, `|`.
+10. When you deliberately want changed mappings, language order, or splitting settings to replace the draft, click **REGENERATE AUTOMATIC PREVIEW**.
+11. Review and manually edit the preview as needed.
+12. Click **UPDATE** to save the exact current preview text without rerunning the converter.
+13. Download the last saved UTF-8 `.txt` file from the button directly below **UPDATE**. Downloading does not rerun the app.
+
+## Correcting detected section languages
+
+For automatically detected bilingual uploads, **Detected source sections** keeps **Index**, **Section**, **Lines**, and **Opening text** read-only and makes only **Language** editable. Each row starts with its automatic detector result and offers the application's two existing production groups: **Chinese** and **Dutch/English or Latin script**. This changes classification only; it never edits, translates, reorders, or reformats the uploaded lyric text.
+
+Section language state has three distinct levels:
+
+- **Automatic language** is the original detector result and remains the baseline.
+- **Pending language** is the current dropdown selection. Editing one or several rows does not yet change counts, matching, conversion inputs, or any other downstream control.
+- **Effective language** is the assignment currently used by the dashboard. Clicking **REFRESH** copies every pending selection to the effective state without rerunning automatic detection.
+
+After **REFRESH**, the dashboard keeps the uploaded file and corrected dropdown values, recalculates Chinese and Latin-side section counts and the uneven/even notice, then rebuilds all language-dependent grouping, section and line matching choices, reciprocal validation, language-order options, and converter inputs from the effective assignments. Existing section and line mappings that are still compatible are preserved; only mappings made incompatible by a changed language group are reset, with a non-blocking notice when a reset was needed.
+
+Corrections are scoped to the current upload using its document identity. Uploading a genuinely new file discards the previous file's pending and effective overrides, runs normal automatic detection, and initializes all three states from those new results. Clearly single-language uploads retain their existing workflow and do not expose the bilingual language editor.
+
+**REFRESH** only applies section-language classifications and rebuilds the dependent workflow. **REGENERATE AUTOMATIC PREVIEW** remains the deliberate conversion step, **UPDATE** remains the exact-text save action, and **Download final TXT** continues to serve the most recently saved output. None of those actions is triggered or replaced by **REFRESH**.
 
 ## Single-language songs
 
