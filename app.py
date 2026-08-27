@@ -771,6 +771,7 @@ with st.expander("Detected source sections", expanded=False):
                 "Language": st.column_config.SelectboxColumn(
                     "Language",
                     options=list(LANGUAGE_CODE_BY_LABEL),
+                    format_func=lambda language: f"{language}  ▾",
                     required=True,
                     help=(
                         "Chinese, or the existing Dutch/English/Latin-script language group."

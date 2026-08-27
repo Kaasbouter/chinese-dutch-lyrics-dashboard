@@ -201,10 +201,16 @@ def test_language_editor_defaults_choices_read_only_columns_and_refresh_order() 
     assert app.session_state[EFFECTIVE_KEY] == AUTOMATIC_UNEVEN_LANGUAGES
 
     assert editor.proto.editing_mode == editor.proto.FIXED
-    assert column_config["Language"]["type_config"] == {
-        "type": "selectbox",
-        "options": [CHINESE, LATIN],
-    }
+    language_type_config = column_config["Language"]["type_config"]
+    assert language_type_config["type"] == "selectbox"
+    assert [option["value"] for option in language_type_config["options"]] == [
+        CHINESE,
+        LATIN,
+    ]
+    assert [option["label"] for option in language_type_config["options"]] == [
+        f"{CHINESE}  ▾",
+        f"{LATIN}  ▾",
+    ]
     assert [
         column
         for column in editor.value.columns
