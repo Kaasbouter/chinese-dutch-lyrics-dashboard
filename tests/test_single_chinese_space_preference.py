@@ -18,6 +18,7 @@ from lyrics_dashboard.models import (
     Section,
     TranslationReference,
 )
+from lyrics_dashboard.parser import parse_lyrics
 from lyrics_dashboard.splitter import split_lyric, split_lyric_result
 from lyrics_dashboard.text_processing import (
     clean_content_result,
@@ -135,16 +136,105 @@ def test_trimmed_and_repeated_whitespace_is_one_normalized_boundary() -> None:
     assert _first_side_result(source, 8) == PREFERRED_RESULT
 
 
-def test_zero_and_multiple_spaces_keep_ordinary_chinese_behavior() -> None:
+def test_zero_spaces_keep_ordinary_behavior_but_multiple_spaces_take_priority() -> None:
     no_space = "祢名超乎萬名之上祢是永遠君王"
     multiple_spaces = "第一部分 第二部分 第三部分"
 
     assert split_lyric(no_space, "zh", 10) == (
         "祢名超乎萬名//之上祢是永遠君王"
     )
-    assert split_lyric(multiple_spaces, "zh", 6) == (
-        "第一部分 第二//部分 第三部分"
+    assert split_lyric(multiple_spaces, "zh", 9) == (
+        "第一部分//第二部分 第三部分"
     )
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    (
+        (
+            "第一部分 第二部分 真理 生命",
+            "第一部分 第二部分//真理 生命",
+        ),
+        (
+            "甲乙丙丁 戊己庚辛 壬癸 子丑 寅卯辰巳",
+            "甲乙丙丁 戊己庚辛//壬癸 子丑 寅卯辰巳",
+        ),
+    ),
+)
+def test_three_or_more_internal_spaces_rank_before_chinese_word_boundaries(
+    source: str,
+    expected: str,
+) -> None:
+    cleaning = clean_content_result(source, "zh")
+
+    assert len(cleaning.original_whitespace_boundaries) >= 3
+    assert split_lyric(source, "zh", 9) == expected
+    assert " //" not in expected
+    assert "// " not in expected
+    assert expected.replace("//", " ").split() == source.split()
+
+
+def test_multiple_safe_spaces_choose_the_best_balanced_midpoint() -> None:
+    source = "甲乙丙丁戊己 庚辛 壬癸子丑"
+
+    assert _first_side_result(source, 9) == "甲乙丙丁戊己//庚辛 壬癸子丑"
+
+
+@pytest.mark.parametrize(
+    ("source", "max_length"),
+    (
+        ("祢愛我 我愛祢", 6),
+        ("祢愛 我 愛祢", 7),
+    ),
+)
+def test_existing_spaces_do_not_require_a_split_by_themselves(
+    source: str,
+    max_length: int,
+) -> None:
+    result = split_lyric_result(
+        source,
+        "zh",
+        max_length,
+        minimum_fragment_length=2,
+        minimum_fragment_ratio=0.25,
+    )
+
+    assert result.text == clean_content_text(source, "zh")
+    assert "//" not in result.text
+
+
+def test_bad_first_space_does_not_hide_a_valid_later_space() -> None:
+    source = "甲 乙丙丁戊己 庚辛壬癸"
+
+    assert _first_side_result(source, 9) == "甲 乙丙丁戊己//庚辛壬癸"
+
+
+def test_all_unsafe_spaces_allow_ordinary_chinese_candidates() -> None:
+    source = "甲 乙丙丁戊己庚辛 壬"
+    result = _first_side_result(source, 4)
+
+    assert result.count("//") == 1
+    assert "甲//" not in result
+    assert "//壬" not in result
+    assert result.replace("//", "") == clean_content_text(source, "zh")
+
+
+def test_protected_pronoun_space_is_rejected_before_another_safe_space() -> None:
+    source = "甲乙丙我 相信戊己 庚辛壬癸"
+
+    result = _first_side_result(source, 9)
+
+    assert result == "甲乙丙我 相信戊己//庚辛壬癸"
+    assert "我//相信" not in result
+
+
+def test_multiple_whitespace_runs_normalize_to_distinct_space_candidates() -> None:
+    source = "第一部分 \t 第二部分\u3000真理   生命"
+    cleaning = clean_content_result(source, "zh")
+
+    assert cleaning.text == "第一部分 第二部分 真理 生命"
+    assert len(cleaning.original_whitespace_boundaries) == 3
+    assert split_lyric(source, "zh", 9) == "第一部分 第二部分//真理 生命"
 
 
 def test_single_space_must_pass_fragment_and_maximum_length_ranking() -> None:
@@ -288,6 +378,71 @@ def test_single_space_preference_works_on_both_pipe_sides_after_switch() -> None
         f"{safe_fallback}|{dutch}",
         f"{dutch}|{safe_fallback}",
     ]
+
+
+def test_multiple_space_priority_works_on_both_pipe_sides_after_switch() -> None:
+    chinese = "天地玄黃甲 宇宙洪 生命光"
+    dutch = "Nederlandse regel"
+    parsed, plan = _single_pair(chinese, dutch)
+
+    output = convert_lyrics(
+        parsed,
+        plan,
+        ConversionSettings(
+            switch_index=1,
+            chinese_max_length=10,
+            dutch_max_length=40,
+        ),
+    )
+    preferred = "天地玄黃甲//宇宙洪 生命光"
+
+    assert _lyric_rows(output) == [
+        f"{preferred}|{dutch}",
+        f"{dutch}|{preferred}",
+    ]
+    assert all(row.count("//") == 1 for row in _lyric_rows(output))
+
+
+def test_multiple_spaces_keep_first_and_second_side_split_thresholds() -> None:
+    chinese = "甲乙丙 戊己 庚辛"
+    dutch = "Nederlandse regel"
+    parsed, plan = _single_pair(chinese, dutch)
+
+    output = convert_lyrics(
+        parsed,
+        plan,
+        ConversionSettings(
+            switch_index=1,
+            chinese_max_length=10,
+            dutch_max_length=40,
+        ),
+    )
+
+    assert _lyric_rows(output) == [
+        f"甲乙丙//戊己 庚辛|{dutch}",
+        f"{dutch}|{chinese}",
+    ]
+
+
+def test_chinese_only_mode_uses_multiple_space_priority() -> None:
+    source = "天地玄黃甲 宇宙洪 生命光"
+    parsed = parse_lyrics(f"Verse 1\n{source}\n")
+
+    output = convert_lyrics(
+        parsed,
+        None,
+        ConversionSettings(chinese_max_length=10),
+    )
+
+    assert parsed.mode == "single-language"
+    assert parsed.single_language == "zh"
+    assert output == "[Verse 1]\n天地玄黃甲//宇宙洪 生命光\n"
+    assert "|" not in output
+
+
+def test_latin_split_locations_are_unchanged() -> None:
+    assert split_lyric("Alpha-beta gamma", "nl", 10) == "Alpha beta//gamma"
+    assert split_lyric("dit is uw belofte", "nl", 10) == "dit is//uw belofte"
 
 
 def test_chinese_only_editable_preview_matches_utf8_txt_export() -> None:
