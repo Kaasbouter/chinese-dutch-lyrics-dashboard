@@ -47,6 +47,13 @@ EFFECTIVE_LANGUAGES_KEY = "effective_section_languages"
 LANGUAGE_EDITOR_KEY = "source_language_editor"
 PRESERVED_ALIGNMENT_KEY = "preserved_alignment_after_language_refresh"
 ALIGNMENT_CURRENT_KEY = "alignment_plan_matches_current_inputs"
+INPUT_SOURCE_KEY = "input_source"
+PASTED_SOURCE_DRAFT_KEY = "pasted_source_draft"
+PASTED_SOURCE_DRAFT_MEMORY_KEY = "pasted_source_draft_memory"
+PROCESSED_SOURCE_TEXT_KEY = "processed_source_text"
+PROCESSED_SOURCE_NAME_KEY = "processed_source_name"
+PROCESSED_SOURCE_KIND_KEY = "processed_source_kind"
+SOURCE_FINGERPRINT_KEY = "source_fingerprint"
 
 LANGUAGE_LABEL_BY_CODE = {
     "zh": "Chinese",
@@ -62,6 +69,52 @@ DragLayout = tuple[
     tuple[tuple[tuple[int, int], ...], ...],
     tuple[tuple[int, int], ...],
 ]
+
+
+def _activate_source(fingerprint: str) -> None:
+    """Reset per-song state when a submitted upload or paste changes."""
+    if st.session_state.get(SOURCE_FINGERPRINT_KEY) == fingerprint:
+        return
+
+    for state_key in list(st.session_state):
+        if state_key in {
+            "alignment_plan",
+            "alignment_fingerprint",
+            "alignment_input_signature",
+            ALIGNMENT_CURRENT_KEY,
+            "control_signature",
+            AUTOMATIC_LANGUAGES_KEY,
+            PENDING_LANGUAGES_KEY,
+            EFFECTIVE_LANGUAGES_KEY,
+            LANGUAGE_EDITOR_KEY,
+            PRESERVED_ALIGNMENT_KEY,
+            "refresh_section_languages",
+            GENERATED_OUTPUT_KEY,
+            EDITABLE_PREVIEW_KEY,
+            EDITED_OUTPUT_WIDGET_KEY,
+            SAVED_FINAL_OUTPUT_KEY,
+            "applied_conversion_warnings",
+            "generation_attempt_signature",
+            "generation_error",
+            "generation_succeeded",
+            "preview_save_succeeded",
+            PROCESSED_SOURCE_TEXT_KEY,
+            PROCESSED_SOURCE_NAME_KEY,
+            PROCESSED_SOURCE_KIND_KEY,
+        } or state_key.startswith(
+            (
+                "manual_match_",
+                "manual_lines_",
+                "manual_lines_signature_",
+                "manual_drag_",
+                "manual_join_",
+            )
+        ):
+            st.session_state.pop(state_key, None)
+
+    st.session_state[SOURCE_FINGERPRINT_KEY] = fingerprint
+    # Keep the existing upload identity key for the established dashboard state.
+    st.session_state["file_fingerprint"] = fingerprint
 
 
 def _section_language_assignments(parsed: ParsedLyrics) -> dict[int, str]:
@@ -675,59 +728,92 @@ with st.expander("Expected input format", expanded=False):
         """
     )
 
-uploaded_file = st.file_uploader(
-    "1. Upload the basic-format lyrics file",
-    type=[extension.lstrip(".") for extension in sorted(SUPPORTED_EXTENSIONS)],
-    help="Supported: DOCX, PDF with selectable text, PPTX, XLSX, TXT, MD, CSV, JSON, XML and HTML.",
+input_source = st.radio(
+    "Input source",
+    ("Upload file", "Paste text"),
+    horizontal=True,
+    key=INPUT_SOURCE_KEY,
 )
 
-if not uploaded_file:
-    st.info("Upload a file to begin.")
-    st.stop()
+if input_source == "Upload file":
+    if PASTED_SOURCE_DRAFT_KEY in st.session_state:
+        st.session_state[PASTED_SOURCE_DRAFT_MEMORY_KEY] = st.session_state[
+            PASTED_SOURCE_DRAFT_KEY
+        ]
+    uploaded_file = st.file_uploader(
+        "1. Upload the basic-format lyrics file",
+        type=[extension.lstrip(".") for extension in sorted(SUPPORTED_EXTENSIONS)],
+        help="Supported: DOCX, PDF with selectable text, PPTX, XLSX, TXT, MD, CSV, JSON, XML and HTML.",
+    )
+    if not uploaded_file:
+        st.info("Upload a file to begin.")
+        st.stop()
 
-file_bytes = uploaded_file.getvalue()
-fingerprint = hashlib.sha256(file_bytes).hexdigest()
-if st.session_state.get("file_fingerprint") != fingerprint:
-    for state_key in list(st.session_state):
-        if state_key in {
-            "alignment_plan",
-            "alignment_fingerprint",
-            "alignment_input_signature",
-            ALIGNMENT_CURRENT_KEY,
-            "control_signature",
-            AUTOMATIC_LANGUAGES_KEY,
-            PENDING_LANGUAGES_KEY,
-            EFFECTIVE_LANGUAGES_KEY,
-            LANGUAGE_EDITOR_KEY,
-            PRESERVED_ALIGNMENT_KEY,
-            "refresh_section_languages",
-            GENERATED_OUTPUT_KEY,
-            EDITABLE_PREVIEW_KEY,
-            EDITED_OUTPUT_WIDGET_KEY,
-            SAVED_FINAL_OUTPUT_KEY,
-            "applied_conversion_warnings",
-            "generation_attempt_signature",
-            "generation_error",
-            "generation_succeeded",
-            "preview_save_succeeded",
-        } or state_key.startswith(
-            (
-                "manual_match_",
-                "manual_lines_",
-                "manual_lines_signature_",
-                "manual_drag_",
-                "manual_join_",
-            )
-        ):
-            st.session_state.pop(state_key, None)
-    st.session_state["file_fingerprint"] = fingerprint
+    file_bytes = uploaded_file.getvalue()
+    fingerprint = hashlib.sha256(file_bytes).hexdigest()
+    _activate_source(fingerprint)
+    try:
+        source_text = extract_text(uploaded_file.name, file_bytes)
+        automatic_parsed = parse_lyrics(source_text)
+    except LyricsDashboardError as exc:
+        st.error(str(exc))
+        st.stop()
+    source_name = uploaded_file.name
+    st.session_state[PROCESSED_SOURCE_TEXT_KEY] = source_text
+    st.session_state[PROCESSED_SOURCE_NAME_KEY] = source_name
+    st.session_state[PROCESSED_SOURCE_KIND_KEY] = "Upload file"
+else:
+    if PASTED_SOURCE_DRAFT_KEY not in st.session_state:
+        st.session_state[PASTED_SOURCE_DRAFT_KEY] = st.session_state.get(
+            PASTED_SOURCE_DRAFT_MEMORY_KEY,
+            st.session_state.get(PROCESSED_SOURCE_TEXT_KEY, "")
+            if st.session_state.get(PROCESSED_SOURCE_KIND_KEY) == "Paste text"
+            else "",
+        )
+    with st.form("paste_source_form"):
+        st.caption("Paste the song in the same basic format you would normally upload.")
+        st.text_area(
+            "Paste song text",
+            key=PASTED_SOURCE_DRAFT_KEY,
+            height=320,
+        )
+        process_text = st.form_submit_button("PROCESS TEXT")
 
-try:
-    source_text = extract_text(uploaded_file.name, file_bytes)
-    automatic_parsed = parse_lyrics(source_text)
-except LyricsDashboardError as exc:
-    st.error(str(exc))
-    st.stop()
+    submitted_parsed: ParsedLyrics | None = None
+    if process_text:
+        submitted_text = st.session_state[PASTED_SOURCE_DRAFT_KEY]
+        st.session_state[PASTED_SOURCE_DRAFT_MEMORY_KEY] = submitted_text
+        if not submitted_text.strip():
+            st.error("Paste song text before processing.")
+        else:
+            try:
+                submitted_parsed = parse_lyrics(submitted_text)
+            except LyricsDashboardError as exc:
+                st.error(str(exc))
+            else:
+                fingerprint = "paste:" + hashlib.sha256(
+                    submitted_text.encode("utf-8")
+                ).hexdigest()
+                _activate_source(fingerprint)
+                st.session_state[PROCESSED_SOURCE_TEXT_KEY] = submitted_text
+                st.session_state[PROCESSED_SOURCE_NAME_KEY] = "pasted_song.txt"
+                st.session_state[PROCESSED_SOURCE_KIND_KEY] = "Paste text"
+
+    if PROCESSED_SOURCE_TEXT_KEY not in st.session_state:
+        st.info("Paste song text and click PROCESS TEXT to begin.")
+        st.stop()
+
+    if st.session_state.get(PROCESSED_SOURCE_KIND_KEY) == "Upload file":
+        st.info("The last uploaded song remains active until you click PROCESS TEXT.")
+
+    source_text = st.session_state[PROCESSED_SOURCE_TEXT_KEY]
+    source_name = st.session_state[PROCESSED_SOURCE_NAME_KEY]
+    fingerprint = st.session_state[SOURCE_FINGERPRINT_KEY]
+    try:
+        automatic_parsed = submitted_parsed or parse_lyrics(source_text)
+    except LyricsDashboardError as exc:
+        st.error(str(exc))
+        st.stop()
 
 automatic_languages = _section_language_assignments(automatic_parsed)
 st.session_state[AUTOMATIC_LANGUAGES_KEY] = dict(automatic_languages)
@@ -916,7 +1002,7 @@ if single_language_mode:
     safe_stem = re.sub(
         r"[^\w\-]+",
         "_",
-        Path(uploaded_file.name).stem,
+        Path(source_name).stem,
         flags=re.UNICODE,
     ).strip("_")
     output_name = f"{safe_stem or 'converted_lyrics'}_formatted.txt"
@@ -1489,7 +1575,7 @@ _render_editable_preview(
     ),
 )
 
-safe_stem = re.sub(r"[^\w\-]+", "_", Path(uploaded_file.name).stem, flags=re.UNICODE).strip("_")
+safe_stem = re.sub(r"[^\w\-]+", "_", Path(source_name).stem, flags=re.UNICODE).strip("_")
 output_name = f"{safe_stem or 'converted_lyrics'}_formatted.txt"
 
 _render_final_actions(

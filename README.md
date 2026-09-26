@@ -17,9 +17,9 @@ Chinese word segmentation uses the free MIT-licensed `jieba` package in its stan
 
 ## Dashboard workflow
 
-1. Upload a supported source file.
+1. Choose **Upload file** (the default) and upload a supported source file, or choose **Paste text**, enter the complete song, and click **PROCESS TEXT**.
 2. Review the detected sections and automatic bilingual or single-language mode.
-3. For an automatically detected bilingual upload, correct any section in the editable **Language** column and click **REFRESH** to apply all pending corrections together.
+3. For an automatically detected bilingual source, correct any section in the editable **Language** column and click **REFRESH** to apply all pending corrections together.
 4. Select the true Dutch translation section or sections for each Chinese section.
 5. Review the numbered reference panels, edit Chinese ranges, drag Dutch cards into the matching rows, and validate reciprocal coverage.
 6. Choose where the output changes from `Chinese|Dutch` to `Dutch|Chinese`.
@@ -33,7 +33,7 @@ Chinese word segmentation uses the free MIT-licensed `jieba` package in its stan
 
 ## Correcting detected section languages
 
-For automatically detected bilingual uploads, **Detected source sections** keeps **Index**, **Section**, **Lines**, and **Opening text** read-only and makes only **Language** editable. Each row starts with its automatic detector result and offers the application's two existing production groups: **Chinese** and **Dutch/English or Latin script**. This changes classification only; it never edits, translates, reorders, or reformats the uploaded lyric text.
+For automatically detected bilingual sources, **Detected source sections** keeps **Index**, **Section**, **Lines**, and **Opening text** read-only and makes only **Language** editable. Each row starts with its automatic detector result and offers the application's two existing production groups: **Chinese** and **Dutch/English or Latin script**. This changes classification only; it never edits, translates, reorders, or reformats the source lyric text.
 
 Section language state has three distinct levels:
 
@@ -41,18 +41,18 @@ Section language state has three distinct levels:
 - **Pending language** is the current dropdown selection. Editing one or several rows does not yet change counts, matching, conversion inputs, or any other downstream control.
 - **Effective language** is the assignment currently used by the dashboard. Clicking **REFRESH** copies every pending selection to the effective state without rerunning automatic detection.
 
-After **REFRESH**, the dashboard keeps the uploaded file and corrected dropdown values, recalculates Chinese and Latin-side section counts and the uneven/even notice, then rebuilds all language-dependent grouping, section and line matching choices, reciprocal validation, language-order options, and converter inputs from the effective assignments. Existing section and line mappings that are still compatible are preserved; only mappings made incompatible by a changed language group are reset, with a non-blocking notice when a reset was needed.
+After **REFRESH**, the dashboard keeps the active source and corrected dropdown values, recalculates Chinese and Latin-side section counts and the uneven/even notice, then rebuilds all language-dependent grouping, section and line matching choices, reciprocal validation, language-order options, and converter inputs from the effective assignments. Existing section and line mappings that are still compatible are preserved; only mappings made incompatible by a changed language group are reset, with a non-blocking notice when a reset was needed.
 
-Corrections are scoped to the current upload using its document identity. Uploading a genuinely new file discards the previous file's pending and effective overrides, runs normal automatic detection, and initializes all three states from those new results. Clearly single-language uploads retain their existing workflow and do not expose the bilingual language editor.
+Corrections are scoped to the current source using its document identity. Uploading a genuinely new file or processing changed pasted text discards the previous source's pending and effective overrides, runs normal automatic detection, and initializes all three states from those new results. Clearly single-language sources retain their existing workflow and do not expose the bilingual language editor.
 
 **REFRESH** only applies section-language classifications and rebuilds the dependent workflow. **REGENERATE AUTOMATIC PREVIEW** remains the deliberate conversion step, **UPDATE** remains the exact-text save action, and **Download final TXT** continues to serve the most recently saved output. None of those actions is triggered or replaced by **REFRESH**.
 
 ## Single-language songs
 
-Chinese-only, Dutch-only, English-only, and other Latin-script lyric files are supported. The parser accepts single-language mode only when the title and every lyric line are consistent with the one detected script; opposite or unsupported script evidence and bilingual `|` markers are rejected instead of being silently treated as a failed bilingual parse.
+Chinese-only, Dutch-only, English-only, and other Latin-script lyric sources are supported. The parser accepts single-language mode only when the title and every lyric line are consistent with the one detected script; opposite or unsupported script evidence and bilingual `|` markers are rejected instead of being silently treated as a failed bilingual parse.
 
 - Manual section matching, manual line matching, reciprocal mapping validation, and the language-order switch are skipped.
-- Sections and lyric lines keep their uploaded order.
+- Sections and lyric lines keep their source order.
 - Output contains only the detected language and never generates `|` or an empty language placeholder.
 - The sole language is treated as the first output side, so every lyric line uses the existing stricter `max(4, floor(normal limit × 0.80))` threshold and the existing first-side minimum-fragment rules.
 - Punctuation removal, whitespace normalization, the one-`//` limit, Latin whitespace/grammatical-phrase protection, Chinese `jieba` protection, fallback warnings, editable preview, and UTF-8 TXT download remain active.
@@ -93,9 +93,15 @@ No Dutch reference syntax needs to be typed. The user must still review every ca
 
 The document must use recognizable headings such as `Verse 1`, `Chorus 1`, `Bridge`, or `Refrein 1`.
 
+## Pasting song text
+
+Select **Paste text** under **Input source**, enter the complete song in **Paste song text**, and click **PROCESS TEXT**. Use the same basic title, section-heading, and lyric-line format as an uploaded file. The text area accepts bilingual and single-language songs. Typing alone does not replace the processed song or change the final editable preview; only **PROCESS TEXT** submits the source. Blank submissions show an error and leave the current song intact.
+
+The exact submitted text receives a stable source identity. Submitting changed text starts a new song and clears the prior song's language corrections, mappings, generated output, editable preview, and saved TXT. Ordinary dashboard reruns keep the processed song active. Uploaded text and pasted text enter the same parser, language correction, matching, conversion, preview, **UPDATE**, and download workflow. Plain leading URL lines are removed by the same preprocessing rule.
+
 ## Leading links before the title
 
-Before title detection, the shared local preprocessing step scans from the start of the extracted document through any initial blank lines and link-only blocks. It ignores standalone `https://`, `http://`, `ftp://`, `www.`, YouTube, shortened, and clearly URL-like domain lines, including consecutive links and clearly continued wrapped URL fragments. After removing those links and their surrounding leading blank lines, the next ordinary non-empty line is processed by the existing title rules. An explicit `[Title]` marker is preserved while this scan continues to the actual title content.
+Before title detection, the shared local preprocessing step scans from the start of the extracted or pasted text through any initial blank lines and link-only blocks. It ignores standalone `https://`, `http://`, `ftp://`, `www.`, YouTube, shortened, and clearly URL-like domain lines, including consecutive links and clearly continued wrapped URL fragments. After removing those links and their surrounding leading blank lines, the next ordinary non-empty line is processed by the existing title rules. An explicit `[Title]` marker is preserved while this scan continues to the actual title content.
 
 For DOCX uploads, a paragraph containing a hyperlink object in this leading area is removed in full, including custom display text such as “Open song website.” The relationship destination is never opened, validated, requested, or exposed to the parser, dashboard controls, preview, status messages, or TXT output. Scanning stops at the first ordinary title-content line, so URLs and hyperlink-formatted text later in the title or lyric content are not broadly removed.
 
@@ -125,7 +131,7 @@ For DOCX uploads, a paragraph containing a hyperlink object in this leading area
 - Each language receives at most one `//` per output row, even when the text is extremely long.
 - Apart from the required punctuation removal and whitespace normalization, lyric characters and words are never translated, rewritten, deleted, duplicated, or reordered.
 - Bilingual export is blocked until all detected sections and lines have valid reciprocal mappings. Single-language mode does not require mappings.
-- Generated output, the editable preview draft, and the saved final output are stored separately. A new upload initializes all three from a new conversion.
+- Generated output, the editable preview draft, and the saved final output are stored separately. A new upload or newly processed paste initializes all three from a new conversion.
 - Changing mappings, language order, or splitting settings does not overwrite the current preview. **REGENERATE AUTOMATIC PREVIEW** deliberately rebuilds the draft from those settings, while the last saved download remains unchanged until **UPDATE** is clicked.
 - **UPDATE** is an unrestricted save action only: it copies the textarea's exact current string—including arbitrary structural edits or an intentionally empty value—into the saved final output without parsing, validation, trimming, normalization, or conversion.
 - The downloaded TXT is built in memory directly from the most recently saved final output, encoded as UTF-8, and served as `text/plain; charset=utf-8`. No temporary output file is written, and clicking **Download final TXT** does not rerun the app.
