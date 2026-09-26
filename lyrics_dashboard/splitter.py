@@ -111,6 +111,54 @@ _DIRECT_OBJECT_VERBS = _TRANSFER_AND_COMMUNICATION_VERBS | frozenset(
         "prijzen prijst prees geprezen tonen toont toonde getoond"
     ).split()
 )
+_VERB_PREPOSITION_PATTERNS = (
+    (
+        frozenset("verlang verlangt verlangen verlangde verlangden".split()),
+        frozenset({"naar"}),
+    ),
+    (frozenset("kijk kijkt kijken keek keken".split()), frozenset({"naar"})),
+    (
+        frozenset("luister luistert luisteren luisterde luisterden".split()),
+        frozenset({"naar"}),
+    ),
+    (
+        frozenset("geloof gelooft geloven geloofde geloofden".split()),
+        frozenset({"in"}),
+    ),
+    (
+        frozenset("vertrouw vertrouwt vertrouwen vertrouwde vertrouwden".split()),
+        frozenset({"op", "in"}),
+    ),
+    (frozenset("wacht wachten wachtte wachtten".split()), frozenset({"op"})),
+    (frozenset("houd houdt houden hield hielden".split()), frozenset({"van"})),
+    (frozenset("vraag vraagt vragen vroeg vroegen".split()), frozenset({"om"})),
+    (frozenset("dank dankt danken dankte dankten".split()), frozenset({"voor"})),
+    (frozenset("bid bidt bidden bad baden".split()), frozenset({"voor", "om"})),
+    (frozenset("roep roept roepen riep riepen".split()), frozenset({"tot"})),
+    (frozenset("long longs longed longing".split()), frozenset({"for"})),
+    (frozenset("look looks looked looking".split()), frozenset({"at", "to"})),
+    (
+        frozenset("listen listens listened listening".split()),
+        frozenset({"to"}),
+    ),
+    (
+        frozenset("believe believes believed believing".split()),
+        frozenset({"in"}),
+    ),
+    (frozenset("trust trusts trusted trusting".split()), frozenset({"in", "on"})),
+    (frozenset("wait waits waited waiting".split()), frozenset({"for"})),
+    (frozenset("ask asks asked asking".split()), frozenset({"for"})),
+    (frozenset("pray prays prayed praying".split()), frozenset({"for"})),
+    (frozenset("call calls called calling".split()), frozenset({"on"})),
+    (
+        frozenset("depend depends depended depending".split()),
+        frozenset({"on"}),
+    ),
+)
+_VERB_PREPOSITION_OBJECT_MODIFIERS = _INDIRECT_OBJECT_MODIFIERS | frozenset(
+    {"living", "levend", "levende"}
+)
+_VERB_PREPOSITION_CLAUSE_BOUNDARIES = frozenset({"zo", "so"})
 _DIRECT_OBJECT_PRONOUNS = _INDIRECT_OBJECT_PRONOUNS | frozenset({"it", "ons"})
 _SHORT_NOUN_PHRASE_DETERMINERS = frozenset().union(
     _DUTCH_ARTICLES_AND_DETERMINERS,
@@ -619,6 +667,65 @@ def _protected_latin_direct_object_spans(
     return tuple(spans)
 
 
+def _verb_preposition_object_end(
+    tokens: tuple[tuple[str, int, int], ...],
+    start_index: int,
+) -> int | None:
+    """Return one bounded complement without entering the next clause."""
+    if start_index >= len(tokens):
+        return None
+    word = tokens[start_index][0].casefold()
+    if word in _VERB_PREPOSITION_CLAUSE_BOUNDARIES:
+        return None
+    if word in _DIRECT_OBJECT_NOUN_PHRASE_DETERMINERS:
+        noun_phrase_end = _short_latin_noun_phrase_end(
+            tokens, start_index, allow_possessive_determiner=True
+        )
+        if noun_phrase_end is not None and all(
+            token.casefold() not in _VERB_PREPOSITION_CLAUSE_BOUNDARIES
+            for token, _start, _end in tokens[start_index:noun_phrase_end]
+        ):
+            return noun_phrase_end
+    if word in _DUTCH_PERSONAL_PRONOUNS | _ENGLISH_PERSONAL_PRONOUNS:
+        return start_index + 1
+
+    index = start_index
+    while (
+        index < len(tokens)
+        and index - start_index < 2
+        and tokens[index][0].casefold() in _VERB_PREPOSITION_OBJECT_MODIFIERS
+    ):
+        index += 1
+    if index > start_index:
+        if (
+            index < len(tokens)
+            and tokens[index][0].casefold()
+            not in _VERB_PREPOSITION_CLAUSE_BOUNDARIES
+            and _local_noun_content(tokens[index][0].casefold())
+        ):
+            return index + 1
+        return None
+    return start_index + 1 if _local_noun_content(word) else None
+
+
+def _protected_latin_verb_preposition_spans(
+    tokens: tuple[tuple[str, int, int], ...],
+) -> tuple[tuple[int, int], ...]:
+    """Keep an exact recognised verb, its preposition, and short object together."""
+    spans = []
+    for index, (verb, start, _end) in enumerate(tokens[:-2]):
+        preposition = tokens[index + 1][0].casefold()
+        if not any(
+            verb.casefold() in forms and preposition in prepositions
+            for forms, prepositions in _VERB_PREPOSITION_PATTERNS
+        ):
+            continue
+        object_end = _verb_preposition_object_end(tokens, index + 2)
+        if object_end is not None:
+            spans.append((start, tokens[object_end - 1][2]))
+    return tuple(spans)
+
+
 def _has_nearby_transfer_verb(
     tokens: tuple[tuple[str, int, int], ...],
     phrase_start_index: int,
@@ -761,6 +868,7 @@ def _protected_grammatical_chain_spans(
         spans.extend(_protected_uw_noun_verb_spans(tokens))
         spans.extend(_protected_short_latin_noun_phrase_spans(tokens))
         spans.extend(_protected_latin_direct_object_spans(tokens))
+        spans.extend(_protected_latin_verb_preposition_spans(tokens))
     return tuple(spans)
 
 
@@ -902,6 +1010,8 @@ def _logical_latin_boundary_value(
     left_word = tokens[right_index - 1][0].casefold()
     value = 0
     if right_word in _LOGICAL_CLAUSE_MARKERS:
+        value = 2
+    elif right_word == "zo":
         value = 2
     elif (
         right_word in _LOGICAL_CONJUNCTIONS
@@ -1122,31 +1232,18 @@ def split_lyric_result(
                 len(cleaned) * _CHINESE_SPACE_MINIMUM_FRAGMENT_RATIO
             ),
         )
-        safe_space_candidates = tuple(
-            boundary
-            for boundary in space_candidates
-            if _boundary_is_outside_spans(boundary, grammatical_spans)
-        )
         preferred_boundary = _choose_balanced_boundary(
             cleaned,
-            safe_space_candidates,
+            space_candidates,
             max_length,
             preferred_fragment_length,
         )
         if preferred_boundary is not None:
-            ranked_boundary = _choose_balanced_boundary(
+            left, right = _split_parts(
                 cleaned,
-                (*word_candidates, *safe_space_candidates),
-                max_length,
-                required_fragment_length,
-                preferred_boundary=preferred_boundary,
-            )
-            if ranked_boundary == preferred_boundary:
-                left, right = _split_parts(
-                    cleaned,
-                    preferred_boundary,
-                ) or (cleaned, "")
-                return SplitResult(f"{left}//{right}" if right else left)
+                preferred_boundary,
+            ) or (cleaned, "")
+            return SplitResult(f"{left}//{right}" if right else left)
         for space_boundary in space_candidates:
             word_candidates = _without_equivalent_split(
                 cleaned,

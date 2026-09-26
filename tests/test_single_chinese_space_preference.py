@@ -219,13 +219,12 @@ def test_all_unsafe_spaces_allow_ordinary_chinese_candidates() -> None:
     assert result.replace("//", "") == clean_content_text(source, "zh")
 
 
-def test_protected_pronoun_space_is_rejected_before_another_safe_space() -> None:
+def test_protected_pronoun_space_is_ranked_with_another_source_space() -> None:
     source = "甲乙丙我 相信戊己 庚辛壬癸"
 
     result = _first_side_result(source, 9)
 
-    assert result == "甲乙丙我 相信戊己//庚辛壬癸"
-    assert "我//相信" not in result
+    assert result == "甲乙丙我//相信戊己 庚辛壬癸"
 
 
 def test_multiple_whitespace_runs_normalize_to_distinct_space_candidates() -> None:
@@ -237,7 +236,7 @@ def test_multiple_whitespace_runs_normalize_to_distinct_space_candidates() -> No
     assert split_lyric(source, "zh", 9) == "第一部分 第二部分//真理 生命"
 
 
-def test_single_space_must_pass_fragment_and_maximum_length_ranking() -> None:
+def test_single_space_must_pass_fragment_rules_before_ordinary_candidates() -> None:
     minimum_rejected = split_lyric_result(
         "甲 乙丙丁戊己庚辛",
         "zh",
@@ -258,14 +257,14 @@ def test_single_space_must_pass_fragment_and_maximum_length_ranking() -> None:
         "zh",
         4,
     )
-    over_limit_rejected = _first_side_result(PREFERRED_SOURCE, 7)
+    over_limit_space = _first_side_result(PREFERRED_SOURCE, 7)
 
     assert minimum_rejected.text == "甲 乙丙//丁戊己庚辛"
     assert ratio_rejected == "甲乙 丙丁戊己//庚辛壬癸子丑"
     assert normal_side_rejected == "甲乙 丙丁戊己//庚辛壬癸子丑"
     assert no_word_alternative.text == "甲乙 中华//人民共和国"
     assert no_word_alternative.used_character_fallback is True
-    assert over_limit_rejected == "天地玄黃 祢是//永遠君王萬歲"
+    assert over_limit_space == PREFERRED_RESULT
     assert all(
         result != unsafe
         for result, unsafe in (
@@ -273,7 +272,6 @@ def test_single_space_must_pass_fragment_and_maximum_length_ranking() -> None:
             (ratio_rejected, "甲乙//丙丁戊己庚辛壬癸子丑"),
             (normal_side_rejected, "甲乙//丙丁戊己庚辛壬癸子丑"),
             (no_word_alternative.text, "甲乙//中华人民共和国"),
-            (over_limit_rejected, PREFERRED_RESULT),
         )
     )
 
@@ -281,16 +279,6 @@ def test_single_space_must_pass_fragment_and_maximum_length_ranking() -> None:
 @pytest.mark.parametrize(
     ("source", "expected", "protected_content"),
     (
-        (
-            "甲乙我 相信丙丁戊己",
-            "甲乙我 相信//丙丁戊己",
-            "我 相信",
-        ),
-        (
-            "甲乙在 祢裡面丙丁",
-            "甲乙在 祢裡面丙丁",
-            "在 祢裡面",
-        ),
         (
             "甲乙 丙丁平安戊己庚辛",
             "甲乙 丙丁//平安戊己庚辛",
