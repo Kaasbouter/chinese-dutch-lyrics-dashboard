@@ -90,6 +90,55 @@ _TRANSFER_AND_COMMUNICATION_VERBS = frozenset(
         "grants tell telling tells told"
     ).split()
 )
+_DIRECT_OBJECT_VERBS = _TRANSFER_AND_COMMUNICATION_VERBS | frozenset(
+    (
+        "teach teaches taught teaching love loves loved loving know knows knew "
+        "known knowing see sees saw seen seeing hear hears heard hearing call "
+        "calls called calling open opens opened opening make makes made making "
+        "keep keeps kept keeping forgive forgives forgave forgiven forgiving "
+        "bless blesses blessed blessing receive receives received receiving "
+        "follow follows followed following praise praises praised praising "
+        "show shows showed shown showing lead leads led leading guide guides "
+        "guided guiding save saves saved saving geven gaf geeft gegeven "
+        "brengen brengt bracht gebracht schenken schenkt schonk geschonken "
+        "vertellen vertelt vertelde verteld leren leert leerde geleerd leiden "
+        "leidt leidde geleid gidsen gidst gidste gegidst redden redt redde "
+        "gered kennen kent kende gekend zien ziet zag gezien horen hoort "
+        "hoorde gehoord roepen roept riep geroepen openen opent opende "
+        "geopend maken maakt maakte gemaakt bewaren bewaart bewaarde bewaard "
+        "vergeven vergeeft vergaf vergeven zegenen zegent zegende gezegend "
+        "ontvangen ontvangt ontving ontvangen volgen volgt volgde gevolgd "
+        "prijzen prijst prees geprezen tonen toont toonde getoond"
+    ).split()
+)
+_DIRECT_OBJECT_PRONOUNS = _INDIRECT_OBJECT_PRONOUNS | frozenset({"it", "ons"})
+_SHORT_NOUN_PHRASE_DETERMINERS = frozenset().union(
+    _DUTCH_ARTICLES_AND_DETERMINERS,
+    _ENGLISH_ARTICLES_AND_DETERMINERS,
+    _CONTEXTUAL_ENGLISH_POSSESSIVE_DETERMINERS,
+)
+_DIRECT_OBJECT_NOUN_PHRASE_DETERMINERS = _INDIRECT_OBJECT_DETERMINERS
+_NOUN_VERB_HEADS = frozenset({"love", "praise"})
+_BARE_DIRECT_OBJECT_HEADS = frozenset(
+    (
+        "strength hope life love grace peace light name song praise thanks "
+        "promise gate kracht hoop leven liefde genade vrede licht naam lied "
+        "lof dank belofte"
+    ).split()
+)
+_SHORT_NOUN_PHRASE_HEADS = _BARE_DIRECT_OBJECT_HEADS | frozenset(
+    (
+        "friend friends people child children smile voice river morning heart "
+        "vriend vrienden mensen kind kinderen glimlach stem rivier ochtend hart"
+    ).split()
+)
+_NOUN_ADJUNCT_HINTS = frozenset(
+    "life river garden morning heart heaven kingdom water fire soul song gospel leven rivier tuin ochtend hart hemel koninkrijk water vuur ziel lied".split()
+)
+_LOGICAL_CLAUSE_MARKERS = frozenset(
+    "that which who when where because although while dat die wie wanneer waar omdat hoewel terwijl".split()
+)
+_LOGICAL_CONJUNCTIONS = frozenset("and but or yet so en maar of doch dus".split())
 _INDIRECT_OBJECT_CLAUSE_BOUNDARIES = frozenset(
     (
         "als although and as because but dat doordat en hoewel if maar of "
@@ -102,6 +151,17 @@ _INDIRECT_OBJECT_STOP_WORDS = frozenset().union(
     _INDIRECT_OBJECT_PREPOSITIONS,
     _DUTCH_UW_FOLLOWING_VERBS,
     "am are be been being is was were".split(),
+)
+_LOCAL_NOUN_PHRASE_BOUNDARIES = frozenset().union(
+    _INDIRECT_OBJECT_STOP_WORDS,
+    _DIRECT_OBJECT_VERBS,
+    _DUTCH_PREPOSITIONS,
+    _ENGLISH_PREPOSITIONS,
+    _DUTCH_PERSONAL_PRONOUNS,
+    _ENGLISH_PERSONAL_PRONOUNS,
+    _DIRECT_OBJECT_NOUN_PHRASE_DETERMINERS,
+    _LOGICAL_CLAUSE_MARKERS,
+    _LOGICAL_CONJUNCTIONS,
 )
 _PROTECTED_LATIN_LEAD_WORDS = frozenset().union(
     _DUTCH_ARTICLES_AND_DETERMINERS,
@@ -403,6 +463,162 @@ def _indirect_object_complement_end(
     return _indirect_object_head_end(tokens, start_index)
 
 
+def _local_noun_content(word: str, *, allow_ambiguous_head: bool = False) -> bool:
+    """Accept one Latin content token without crossing a clear local boundary."""
+    return word.isalpha() and (
+        word not in _LOCAL_NOUN_PHRASE_BOUNDARIES
+        or (allow_ambiguous_head and word in _NOUN_VERB_HEADS)
+    )
+
+
+def _short_latin_noun_phrase_end(
+    tokens: tuple[tuple[str, int, int], ...],
+    start_index: int,
+    *,
+    allow_possessive_determiner: bool = False,
+) -> int | None:
+    """Return the end of a determiner plus at most two modifiers and a head."""
+    determiners = (
+        _DIRECT_OBJECT_NOUN_PHRASE_DETERMINERS
+        if allow_possessive_determiner
+        else _SHORT_NOUN_PHRASE_DETERMINERS
+    )
+    if (
+        start_index + 1 >= len(tokens)
+        or tokens[start_index][0].casefold() not in determiners
+    ):
+        return None
+
+    index = start_index + 1
+    modifier_count = 0
+    while (
+        index < len(tokens)
+        and modifier_count < 2
+        and tokens[index][0].casefold() in _INDIRECT_OBJECT_MODIFIERS
+    ):
+        modifier_count += 1
+        index += 1
+
+    if modifier_count:
+        if (
+            index < len(tokens)
+            and tokens[index][0].casefold() not in _INDIRECT_OBJECT_MODIFIERS
+            and _local_noun_content(
+                tokens[index][0].casefold(),
+                allow_ambiguous_head=True,
+            )
+        ):
+            return index + 1
+        return None
+
+    if not _local_noun_content(
+        tokens[index][0].casefold(), allow_ambiguous_head=True
+    ):
+        return None
+    # A small head vocabulary permits noun+noun forms such as "the life gate"
+    # without treating arbitrary following words as part of the noun phrase.
+    if (
+        index + 1 < len(tokens)
+        and tokens[index + 1][0].casefold() not in _INDIRECT_OBJECT_MODIFIERS
+        and (
+            tokens[index + 1][0].casefold() in _SHORT_NOUN_PHRASE_HEADS
+            or tokens[index][0].casefold() in _NOUN_ADJUNCT_HINTS
+        )
+        and _local_noun_content(tokens[index + 1][0].casefold())
+    ):
+        return index + 2
+    return index + 1
+
+
+def _is_transfer_recipient_with_complement(
+    tokens: tuple[tuple[str, int, int], ...],
+    pronoun_index: int,
+) -> bool:
+    """Keep the existing give/bring/grant recipient handling intact."""
+    return (
+        pronoun_index > 0
+        and tokens[pronoun_index - 1][0].casefold()
+        in _TRANSFER_AND_COMMUNICATION_VERBS
+        and _indirect_object_complement_end(tokens, pronoun_index + 1)
+        is not None
+    )
+
+
+def _is_direct_object_pronoun_after_verb(
+    tokens: tuple[tuple[str, int, int], ...],
+    pronoun_index: int,
+) -> bool:
+    if pronoun_index == 0:
+        return False
+    return (
+        tokens[pronoun_index][0].casefold() in _DIRECT_OBJECT_PRONOUNS
+        and tokens[pronoun_index - 1][0].casefold() in _DIRECT_OBJECT_VERBS
+        and not _is_transfer_recipient_with_complement(tokens, pronoun_index)
+    )
+
+
+def _protected_short_latin_noun_phrase_spans(
+    tokens: tuple[tuple[str, int, int], ...],
+) -> tuple[tuple[int, int], ...]:
+    spans = []
+    for index, (_word, start, _end) in enumerate(tokens):
+        phrase_end = _short_latin_noun_phrase_end(tokens, index)
+        if phrase_end is not None:
+            spans.append((start, tokens[phrase_end - 1][2]))
+    return tuple(spans)
+
+
+def _protected_latin_direct_object_spans(
+    tokens: tuple[tuple[str, int, int], ...],
+) -> tuple[tuple[int, int], ...]:
+    """Protect only an adjacent recognised verb and one bounded object."""
+    spans = []
+    for index, (verb, start, _end) in enumerate(tokens[:-1]):
+        if verb.casefold() not in _DIRECT_OBJECT_VERBS:
+            continue
+        object_index = index + 1
+        object_word = tokens[object_index][0].casefold()
+        if object_word in _DIRECT_OBJECT_PRONOUNS:
+            if _is_transfer_recipient_with_complement(tokens, object_index):
+                object_end = None
+            else:
+                possessive_end = _short_latin_noun_phrase_end(
+                    tokens,
+                    object_index,
+                    allow_possessive_determiner=True,
+                )
+                if (
+                    possessive_end is not None
+                    and (
+                        possessive_end > object_index + 2
+                        or tokens[possessive_end - 1][0].casefold()
+                        in _SHORT_NOUN_PHRASE_HEADS
+                    )
+                ):
+                    object_end = possessive_end
+                else:
+                    object_end = object_index + 1
+        elif object_word in _DIRECT_OBJECT_NOUN_PHRASE_DETERMINERS:
+            object_end = _short_latin_noun_phrase_end(
+                tokens,
+                object_index,
+                allow_possessive_determiner=True,
+            )
+            if (
+                object_end is not None
+                and verb.casefold() in _TRANSFER_AND_COMMUNICATION_VERBS
+                and object_word in _INDIRECT_OBJECT_POSSESSIVE_DETERMINERS
+            ):
+                object_end = None
+        elif object_word in _BARE_DIRECT_OBJECT_HEADS:
+            object_end = object_index + 1
+        else:
+            object_end = None
+        if object_end is not None:
+            spans.append((start, tokens[object_end - 1][2]))
+    return tuple(spans)
+
+
 def _has_nearby_transfer_verb(
     tokens: tuple[tuple[str, int, int], ...],
     phrase_start_index: int,
@@ -502,6 +718,14 @@ def _protected_grammatical_chain_spans(
     spans: list[tuple[int, int]] = []
     index = 0
     while index < len(tokens):
+        if (
+            language == "nl"
+            and _is_direct_object_pronoun_after_verb(tokens, index)
+        ):
+            # The direct object completes the preceding verb phrase; the
+            # generic pronoun lead must not absorb the next clause or repeat.
+            index += 1
+            continue
         if not _is_protected_grammatical_lead(tokens[index][0], language):
             index += 1
             continue
@@ -535,6 +759,8 @@ def _protected_grammatical_chain_spans(
     if language == "nl":
         spans.extend(_protected_latin_indirect_object_spans(tokens))
         spans.extend(_protected_uw_noun_verb_spans(tokens))
+        spans.extend(_protected_short_latin_noun_phrase_spans(tokens))
+        spans.extend(_protected_latin_direct_object_spans(tokens))
     return tuple(spans)
 
 
@@ -659,6 +885,106 @@ def _adjust_boundary_around_protected_spans(
     return safe_boundary
 
 
+def _logical_latin_boundary_value(
+    text: str,
+    boundary: int,
+    tokens: tuple[tuple[str, int, int], ...],
+    phrase_spans: tuple[tuple[int, int], ...],
+) -> int:
+    """Recognise a few local clause and complete-phrase edges."""
+    right_index = next(
+        (index for index, (_word, start, _end) in enumerate(tokens) if start >= boundary),
+        None,
+    )
+    if right_index is None or right_index == 0:
+        return 0
+    right_word = tokens[right_index][0].casefold()
+    left_word = tokens[right_index - 1][0].casefold()
+    value = 0
+    if right_word in _LOGICAL_CLAUSE_MARKERS:
+        value = 2
+    elif (
+        right_word in _LOGICAL_CONJUNCTIONS
+        or left_word in _LOGICAL_CONJUNCTIONS
+    ):
+        value = 1
+
+    if any(
+        end <= boundary and text[end:boundary].isspace()
+        for _start, end in phrase_spans
+    ):
+        value = max(value, 1)
+
+    if right_index + 1 < len(tokens):
+        next_word = tokens[right_index + 1][0].casefold()
+        if (
+            _local_noun_content(right_word)
+            and _local_noun_content(next_word)
+            and any(
+                tokens[index][0].casefold() == right_word
+                and tokens[index + 1][0].casefold() == next_word
+                for index in range(right_index - 1)
+            )
+        ):
+            value = max(value, 2)
+    return value
+
+
+def _prefer_logical_latin_boundary(
+    text: str,
+    selected: int,
+    preferred: int,
+    candidates: Iterable[int],
+    max_length: int,
+    minimum_fragment_length: int,
+    protected_spans: tuple[tuple[int, int], ...],
+) -> int:
+    """Break a close balance tie without relaxing any existing split guard."""
+    selected_parts = _split_parts(text, selected)
+    if selected_parts is None:
+        return selected
+    selected_imbalance = abs(len(selected_parts[0]) - len(selected_parts[1]))
+    selected_within_limit = all(len(part) <= max_length for part in selected_parts)
+    tokens = _grammatical_token_spans(text, "nl")
+    phrase_spans = (
+        _protected_short_latin_noun_phrase_spans(tokens)
+        + _protected_latin_direct_object_spans(tokens)
+    )
+    selected_value = _logical_latin_boundary_value(
+        text, selected, tokens, phrase_spans
+    )
+    alternatives: list[tuple[int, int, int, int]] = []
+    for boundary in set(candidates):
+        if (
+            boundary == selected
+            or abs(boundary - selected) > 6
+            or abs(boundary - preferred) > abs(selected - preferred) + 5
+            or not _boundary_is_outside_spans(boundary, protected_spans)
+        ):
+            continue
+        parts = _split_parts(text, boundary)
+        if parts is None:
+            continue
+        if min(map(len, parts)) < max(
+            minimum_fragment_length,
+            math.ceil(len(text) * 0.25),
+        ):
+            continue
+        if all(len(part) <= max_length for part in parts) != selected_within_limit:
+            continue
+        imbalance = abs(len(parts[0]) - len(parts[1]))
+        if imbalance > selected_imbalance + 2:
+            continue
+        value = _logical_latin_boundary_value(
+            text, boundary, tokens, phrase_spans
+        )
+        if value > selected_value:
+            alternatives.append(
+                (-value, imbalance, abs(boundary - preferred), boundary)
+            )
+    return min(alternatives)[3] if alternatives else selected
+
+
 def _chinese_word_boundaries(text: str) -> tuple[int, ...]:
     boundaries: set[int] = set()
     for _word, _start, end in _CHINESE_TOKENIZER.tokenize(
@@ -758,6 +1084,7 @@ def split_lyric_result(
         )
         if boundary is None:
             return SplitResult(cleaned)
+        preferred_boundary = boundary
         boundary = _adjust_boundary_around_protected_spans(
             cleaned,
             boundary,
@@ -768,6 +1095,15 @@ def split_lyric_result(
         )
         if boundary is None:
             return SplitResult(cleaned)
+        boundary = _prefer_logical_latin_boundary(
+            cleaned,
+            boundary,
+            preferred_boundary,
+            whitespace_candidates,
+            max_length,
+            required_fragment_length,
+            grammatical_spans,
+        )
         left, right = _split_parts(cleaned, boundary) or (cleaned, "")
         return SplitResult(f"{left}//{right}" if right else left)
 

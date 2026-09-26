@@ -447,11 +447,11 @@ def test_line_remains_unsplit_when_no_balanced_safe_candidate_exists(
     (
         (
             "Wij zien haar mooie glimlach iedere dag",
-            "Wij zien haar mooie//glimlach iedere dag",
+            "Wij zien haar mooie glimlach//iedere dag",
         ),
         (
             "We see her bright smile every day",
-            "We see her bright//smile every day",
+            "We see her bright smile//every day",
         ),
         (
             "He forgives me new hope for every day",
@@ -463,10 +463,12 @@ def test_line_remains_unsplit_when_no_balanced_safe_candidate_exists(
         ),
     ),
 )
-def test_unrecognised_verbs_do_not_create_indirect_object_spans(
+def test_nontransfer_verbs_do_not_create_indirect_object_spans(
     source: str,
     expected: str,
 ) -> None:
+    # See/zien now protect their short direct-object noun phrases, while the
+    # recipient-specific indirect-object rule remains limited to transfer verbs.
     assert split_lyric(source, "nl", 20) == expected
 
 
