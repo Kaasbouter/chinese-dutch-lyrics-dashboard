@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-import re
 from collections.abc import MutableMapping
-from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -21,6 +19,7 @@ from lyrics_dashboard.converter import (
     ConversionSettings,
     convert_lyrics,
     derive_first_side_limit,
+    derive_output_filename,
     encode_utf8_txt,
 )
 from lyrics_dashboard.drag_mapping import (
@@ -560,10 +559,17 @@ def _render_editable_preview(*, subheader: str, help_text: str) -> None:
 
 def _render_final_actions(
     *,
-    output_name: str,
+    parsed: ParsedLyrics,
+    source_name: str,
 ) -> None:
     """Render the exact-save action directly above the saved TXT download."""
-    download_data = encode_utf8_txt(st.session_state[SAVED_FINAL_OUTPUT_KEY])
+    saved_output = st.session_state[SAVED_FINAL_OUTPUT_KEY]
+    download_data = encode_utf8_txt(saved_output)
+    output_name = derive_output_filename(
+        saved_output,
+        source_title=parsed.raw_title,
+        source_name=source_name,
+    )
     _, action_column = st.columns([2, 1], gap="small")
     with action_column:
         st.button(
@@ -999,15 +1005,9 @@ if single_language_mode:
         ),
     )
 
-    safe_stem = re.sub(
-        r"[^\w\-]+",
-        "_",
-        Path(source_name).stem,
-        flags=re.UNICODE,
-    ).strip("_")
-    output_name = f"{safe_stem or 'converted_lyrics'}_formatted.txt"
     _render_final_actions(
-        output_name=output_name,
+        parsed=parsed,
+        source_name=source_name,
     )
     st.stop()
 
@@ -1575,9 +1575,7 @@ _render_editable_preview(
     ),
 )
 
-safe_stem = re.sub(r"[^\w\-]+", "_", Path(source_name).stem, flags=re.UNICODE).strip("_")
-output_name = f"{safe_stem or 'converted_lyrics'}_formatted.txt"
-
 _render_final_actions(
-    output_name=output_name,
+    parsed=parsed,
+    source_name=source_name,
 )

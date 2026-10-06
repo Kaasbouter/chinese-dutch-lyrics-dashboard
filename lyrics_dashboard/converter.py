@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
+from pathlib import Path
 
 from .alignment import validate_alignment_plan
 from .errors import PairingError
@@ -35,6 +37,48 @@ def derive_first_side_limit(normal_limit: int) -> int:
 def encode_utf8_txt(text: str) -> bytes:
     """Encode the editable preview exactly as the downloaded UTF-8 TXT body."""
     return text.encode("utf-8")
+
+
+def derive_output_filename(
+    saved_output: str,
+    *,
+    source_title: str,
+    source_name: str,
+) -> str:
+    """Name the download after its saved title, with the source as a fallback."""
+    title_lines: list[str] = []
+    collecting_title = False
+    for line in saved_output.splitlines():
+        line = line.strip().lstrip("\ufeff").strip()
+        if line.casefold() == "[title]":
+            collecting_title = True
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            break
+        if collecting_title:
+            if not line and title_lines:
+                break
+            if line:
+                title_lines.append(line)
+
+    for candidate in (
+        " ".join(title_lines),
+        source_title,
+        Path(source_name).stem,
+        "converted_lyrics",
+    ):
+        # Keep Unicode and spaces, replacing characters forbidden in filenames.
+        stem = re.sub(r'[<>:"/\\|?*\x00-\x1f\x7f]+', " ", candidate)
+        stem = " ".join(stem.split()).strip(" .")
+        if stem:
+            break
+    if re.fullmatch(
+        r"(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?",
+        stem,
+        flags=re.IGNORECASE,
+    ):
+        stem = f"_{stem}"
+    return f"{stem}.txt"
 
 
 def _format_title(parsed: ParsedLyrics, separator: str) -> list[str]:

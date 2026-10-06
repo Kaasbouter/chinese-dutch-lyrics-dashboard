@@ -290,7 +290,7 @@ def test_download_uses_saved_utf8_data_without_triggering_a_rerun(
     latest_call = download_calls[-1]
 
     assert latest_call["data"] == encode_utf8_txt(saved_output)
-    assert latest_call["file_name"] == "english-only_formatted.txt"
+    assert latest_call["file_name"] == "Grace.txt"
     assert latest_call["mime"] == "text/plain; charset=utf-8"
     assert latest_call["on_click"] == "ignore"
     assert download_button.proto.ignore_rerun is True

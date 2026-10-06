@@ -137,6 +137,7 @@ For DOCX uploads, a paragraph containing a hyperlink object in this leading area
 - Changing mappings, language order, or splitting settings does not overwrite the current preview. **REGENERATE AUTOMATIC PREVIEW** deliberately rebuilds the draft from those settings, while the last saved download remains unchanged until **UPDATE** is clicked.
 - **UPDATE** is an unrestricted save action only: it copies the textarea's exact current string—including arbitrary structural edits or an intentionally empty value—into the saved final output without parsing, validation, trimming, normalization, or conversion.
 - The downloaded TXT is built in memory directly from the most recently saved final output, encoded as UTF-8, and served as `text/plain; charset=utf-8`. No temporary output file is written, and clicking **Download final TXT** does not rerun the app.
+- Downloads use the saved `[Title]` text as the filename, such as `安靜 Still.txt`, for both uploaded documents and pasted lyrics. Chinese characters and spaces are preserved; characters that cannot be used in filenames are replaced with spaces. Title edits change the download name after **UPDATE**. If the saved text has no usable title, the original song title or upload filename is used instead.
 - Typing alone changes only the editable draft. Until **UPDATE** is clicked, the download continues to contain the prior saved value.
 
 ## Run on Windows
