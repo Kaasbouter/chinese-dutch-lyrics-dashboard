@@ -93,6 +93,8 @@ No Dutch reference syntax needs to be typed. The user must still review every ca
 
 The document must use recognizable headings such as `Verse 1`, `Chorus 1`, `Bridge`, or `Refrein 1`.
 
+Standalone `End` is also recognized as an Outro section heading, including case-insensitive and square-bracket forms such as `END`, `end`, `[End]`, and numbered forms such as `End 1`, `End 2`, or `[End 1]`. Output preserves the name as `[End]` (or `[End 1]` when numbered). Its following lyric lines determine the section language; the heading itself is excluded from language detection. The word `end` within a lyric sentence remains lyric text. This applies to both pasted text and uploaded files.
+
 ## Pasting song text
 
 Select **Paste text** under **Input source**, enter the complete song in **Paste song text**, and click **PROCESS TEXT**. Use the same basic title, section-heading, and lyric-line format as an uploaded file. The text area accepts bilingual and single-language songs. Typing alone does not replace the processed song or change the final editable preview; only **PROCESS TEXT** submits the source. Blank submissions show an error and leave the current song intact.

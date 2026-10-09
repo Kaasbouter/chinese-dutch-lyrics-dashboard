@@ -67,13 +67,14 @@ _KIND_ALIASES = {
     "pre chorus": "Pre-Chorus",
     "intro": "Intro",
     "outro": "Outro",
+    "end": "End",
     "interlude": "Interlude",
     "tag": "Tag",
 }
 
 _HEADING_RE = re.compile(
     r"^\s*\[?\s*(?P<kind>title|verse|couplet|chorus|refrein|refrain|bridge|"
-    r"pre[- ]chorus|intro|outro|interlude|tag)\s*(?P<number>\d+)?\s*\]?\s*:?\s*$",
+    r"pre[- ]chorus|intro|outro|end|interlude|tag)\s*(?P<number>\d+)?\s*\]?\s*:?\s*$",
     re.IGNORECASE,
 )
 
@@ -359,7 +360,7 @@ def parse_lyrics(text: str) -> ParsedLyrics:
         sections.append(
             Section(
                 label=_display_label(kind, number),
-                kind=kind,
+                kind="Outro" if kind == "End" else kind,
                 number=number,
                 lines=tuple(lyric_lines),
                 language=language,
