@@ -70,7 +70,7 @@ def _exact_plan(parsed):
 def test_parser_accepts_unequal_language_section_counts() -> None:
     parsed = parse_lyrics(SOURCE)
 
-    assert parsed.chinese_title == "祢信實何廣大"
+    assert parsed.chinese_title == "1 祢信實何廣大"
     assert parsed.dutch_title == "Groot is Uw trouw O Heer"
     assert [section.language for section in parsed.sections] == ["zh", "zh", "zh", "nl", "nl"]
     assert any("3 Chinese sections and 2 Dutch sections" in warning for warning in parsed.warnings)
@@ -111,7 +111,7 @@ def test_converter_switches_order_at_selected_original_section() -> None:
         ConversionSettings(switch_index=3, chinese_max_length=10, dutch_max_length=40),
     )
 
-    assert "[Title]\n祢信實何廣大 Groot is Uw trouw O Heer" in output
+    assert "[Title]\n1 祢信實何廣大 Groot is Uw trouw O Heer" in output
     first_verse = output.split("[Verse 1]\n", 1)[1].split("\n\n", 1)[0]
     dutch_verse = output.split("[Verse 4]\n", 1)[1].split("\n\n", 1)[0]
     assert first_verse.splitlines()[0].startswith("祢信實")
@@ -121,7 +121,9 @@ def test_converter_switches_order_at_selected_original_section() -> None:
 
 
 def test_representative_bilingual_output_remains_byte_for_byte_unchanged() -> None:
-    parsed = parse_lyrics(SOURCE)
+    # Keep this regression focused on unrelated output rules; numbered titles
+    # are covered separately because their prefix must now remain in the output.
+    parsed = parse_lyrics(SOURCE.removeprefix("1 "))
     output = convert_lyrics(
         parsed,
         _exact_plan(parsed),
@@ -365,7 +367,7 @@ def test_uploaded_basic_format_example_converts_end_to_end() -> None:
     output = convert_lyrics(parsed, plan, ConversionSettings(switch_index=4))
 
     assert len(parsed.sections) == 8
-    assert output.startswith("[Title]\n祢信實何廣大 Groot is Uw trouw O Heer")
+    assert output.startswith("[Title]\n1 祢信實何廣大 Groot is Uw trouw O Heer")
     assert "[Verse 1]\n祢信實何廣大" in output
     assert "[Verse 4]\nGroot is Uw trouw" in output
     assert output.endswith("\n")

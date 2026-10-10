@@ -116,12 +116,8 @@ def detect_language(text: str) -> Language:
     return "zh" if cjk > latin else "nl"
 
 
-def _remove_leading_track_number(title: str) -> str:
-    return re.sub(r"^\s*\d+\s*[-._):]?\s*", "", title).strip()
-
-
 def _split_title(title_lines: list[str]) -> tuple[str, str, str]:
-    cleaned_lines = [_remove_leading_track_number(line) for line in title_lines if line.strip()]
+    cleaned_lines = [line.strip() for line in title_lines if line.strip()]
     raw_title = " ".join(cleaned_lines).strip()
     if not raw_title:
         return "", "", ""

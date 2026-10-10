@@ -61,8 +61,8 @@ def test_supported_leading_url_forms_never_reach_single_language_output(
     downloaded = encode_utf8_txt(preview)
 
     assert extracted.startswith("1 Grace\n")
-    assert parsed.raw_title == "Grace"
-    assert parsed.dutch_title == "Grace"
+    assert parsed.raw_title == "1 Grace"
+    assert parsed.dutch_title == "1 Grace"
     assert parsed.sections[0].lines == ("Lyrics remain unchanged.",)
     assert "forbiddenmarker" not in repr(parsed).lower()
     assert "forbiddenmarker" not in preview.lower()
@@ -89,7 +89,7 @@ def test_all_initial_blanks_multiple_links_and_wrapped_fragments_are_removed() -
     parsed = parse_lyrics(extracted)
 
     assert extracted.splitlines()[0] == "1 Song title"
-    assert parsed.raw_title == "Song title"
+    assert parsed.raw_title == "1 Song title"
     assert parsed.sections[0].lines == ("Lyrics stay in place",)
     for fragment in (
         "example.com",
@@ -303,7 +303,7 @@ def test_docx_leading_hyperlink_display_and_destination_are_excluded() -> None:
         "Ordinary lyric line",
         "Later hyperlink lyric stays",
     ]
-    assert parsed.raw_title == "Grace"
+    assert parsed.raw_title == "1 Grace"
     assert parsed.sections[0].lines == (
         "Ordinary lyric line",
         "Later hyperlink lyric stays",

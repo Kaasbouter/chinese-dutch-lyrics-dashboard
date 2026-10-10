@@ -144,13 +144,13 @@ def test_paste_mode_exposes_only_source_text_and_process_action_before_submissio
             "1 中文歌名\n\nVerse 1\n這是中文歌詞\n\nChorus 1\n賜我平安\n",
             "zh",
             ["[Verse 1]", "[Chorus 1]"],
-            "中文歌名",
+            "1 中文歌名",
         ),
         (
             "1 Genade\n\nVerse 1\nWij zingen samen voor de Heer\n",
             "nl",
             ["[Verse 1]"],
-            "Genade",
+            "1 Genade",
         ),
         (ENGLISH_SOURCE, "nl", ["[Verse 1]", "[Chorus 1]"], "Grace"),
     ],
@@ -268,7 +268,7 @@ def test_pasted_leading_links_use_existing_title_detection() -> None:
     app = _process(_start_paste_mode(), source)
 
     assert not app.error
-    assert _final_area(app).value.startswith("[Title]\nSong title\n")
+    assert _final_area(app).value.startswith("[Title]\n1 Song title\n")
     assert "forbidden-marker" not in _final_area(app).value
     assert "Lyrics stay in place" in _final_area(app).value
 

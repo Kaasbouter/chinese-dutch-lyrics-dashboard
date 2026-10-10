@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -94,8 +95,27 @@ def _format_title(parsed: ParsedLyrics, separator: str) -> list[str]:
         title = clean_content_text(title_source, language)
         return ["[Title]", title, ""] if title else []
     if parsed.chinese_title and parsed.dutch_title:
-        chinese_title = clean_content_text(parsed.chinese_title, "zh")
-        dutch_title = clean_content_text(parsed.dutch_title, "nl")
+        chinese_source = parsed.chinese_title
+        dutch_source = parsed.dutch_title
+        # Keep the source song number first even when a Latin-first title is
+        # rendered in the existing Chinese-first order. Clean its punctuation
+        # together with the title rather than adding another copy of the digits.
+        number_prefix = re.match(r"^\d+", parsed.raw_title)
+        if number_prefix and parsed.raw_title.startswith(dutch_source):
+            prefix_end = number_prefix.end()
+            while prefix_end < len(dutch_source):
+                character = dutch_source[prefix_end]
+                if not (
+                    character.isspace()
+                    or unicodedata.category(character).startswith("P")
+                ):
+                    break
+                prefix_end += 1
+            prefix = dutch_source[:prefix_end]
+            dutch_source = dutch_source[len(prefix):]
+            chinese_source = prefix + chinese_source
+        chinese_title = clean_content_text(chinese_source, "zh")
+        dutch_title = clean_content_text(dutch_source, "nl")
         title = separator.join(part for part in (chinese_title, dutch_title) if part)
     elif parsed.chinese_title:
         title = clean_content_text(parsed.chinese_title, "zh")

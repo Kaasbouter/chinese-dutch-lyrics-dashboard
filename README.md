@@ -110,6 +110,7 @@ For DOCX uploads, a paragraph containing a hyperlink object in this leading area
 ## Output rules
 
 - Section names are surrounded by square brackets.
+- A leading song number remains part of the title directly below `[Title]`, including its original digits and leading zeros. This applies to uploaded files and **PROCESS TEXT**, single-language and bilingual titles, the editable preview, **UPDATE**, and the saved UTF-8 TXT. For example, `135 人算什麼 (分2)` becomes `135 人算什麼 分2` under the existing punctuation-cleaning rules, while `001 Groot is Uw trouw` keeps `001`. Bilingual titles retain the existing language order and chosen title separator, with the original song number kept at the beginning. Unnumbered titles receive no added number; section and lyric numbering are unchanged.
 - Bilingual output separates the two languages with `|`; single-language output never generates `|`.
 - Before the selected switch point, output is `Chinese|Dutch`.
 - From the selected switch point onward, output is `Dutch|Chinese`.
