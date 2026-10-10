@@ -64,6 +64,7 @@ class CleanContentResult:
     text: str
     original_whitespace_boundaries: tuple[int, ...] = ()
     punctuation_separator_boundaries: tuple[int, ...] = ()
+    original_comma_boundaries: tuple[int, ...] = ()
 
 
 def is_standalone_url_line(line: str) -> bool:
@@ -198,15 +199,20 @@ def _punctuation_needs_separator(previous: str, following: str) -> bool:
 
 def _normalize_whitespace(
     characters: list[tuple[str, bool]],
+    original_comma_positions: Collection[int] = (),
 ) -> CleanContentResult:
     normalized: list[str] = []
     original_boundaries: list[int] = []
     punctuation_boundaries: list[int] = []
+    comma_positions = set(original_comma_positions)
+    comma_boundaries: list[int] = []
     index = 0
 
     while index < len(characters):
         character, from_original_whitespace = characters[index]
         if not character.isspace():
+            if index in comma_positions:
+                comma_boundaries.append(len(normalized))
             normalized.append(character)
             index += 1
             continue
@@ -230,12 +236,26 @@ def _normalize_whitespace(
                 original_boundaries.append(separator_end)
             else:
                 punctuation_boundaries.extend((separator_start, separator_end))
+            # A removed comma touching whitespace shares its normalized edge,
+            # including when the comma came immediately after the whitespace.
+            if any(
+                position in comma_positions
+                for position in range(index, whitespace_end + 1)
+            ):
+                comma_boundaries.append(separator_end)
         index = whitespace_end
 
     return CleanContentResult(
         text="".join(normalized),
         original_whitespace_boundaries=tuple(original_boundaries),
         punctuation_separator_boundaries=tuple(punctuation_boundaries),
+        original_comma_boundaries=tuple(
+            sorted({
+                boundary
+                for boundary in comma_boundaries
+                if 0 < boundary < len(normalized)
+            })
+        ),
     )
 
 
@@ -243,12 +263,13 @@ def clean_content_result(
     text: str,
     language: LanguageCode,
 ) -> CleanContentResult:
-    """Clean content while retaining the origin of normalized separators.
+    """Clean content while retaining source whitespace and Chinese comma positions.
 
     Structural output markers are intentionally not passed through this function;
     the converter adds ``[Section]``, ``|``, and ``//`` after content cleaning.
     """
     cleaned: list[tuple[str, bool]] = []
+    original_comma_positions: list[int] = []
     index = 0
     while index < len(text):
         character = text[index]
@@ -261,13 +282,17 @@ def clean_content_result(
         while punctuation_end < len(text) and _is_punctuation(text[punctuation_end]):
             punctuation_end += 1
 
+        if language == "zh" and any(
+            comma in text[index:punctuation_end] for comma in (",", "，")
+        ):
+            original_comma_positions.append(len(cleaned))
         previous = _previous_content_character(cleaned)
         following = _next_content_character(text, punctuation_end)
         if language == "nl" or _punctuation_needs_separator(previous, following):
             cleaned.append((" ", False))
         index = punctuation_end
 
-    return _normalize_whitespace(cleaned)
+    return _normalize_whitespace(cleaned, original_comma_positions)
 
 
 def clean_content_text(text: str, language: LanguageCode) -> str:

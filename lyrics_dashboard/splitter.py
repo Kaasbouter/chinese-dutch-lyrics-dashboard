@@ -1163,7 +1163,7 @@ def split_lyric_result(
     cleaning = clean_content_result(text, language)
     cleaned = cleaning.text
     # Keep the existing split trigger's single-space allowance separate from
-    # the priority given to all source-space candidates below.
+    # the priority given to source-space and source-comma candidates below.
     single_space_boundary: int | None = None
     if (
         language == "zh"
@@ -1224,8 +1224,11 @@ def split_lyric_result(
         for boundary in _chinese_word_boundaries(cleaned)
         if boundary not in cleaning.punctuation_separator_boundaries
     )
-    space_candidates = cleaning.original_whitespace_boundaries
-    if space_candidates:
+    source_candidates = tuple(sorted(set(
+        cleaning.original_whitespace_boundaries
+        + cleaning.original_comma_boundaries
+    )))
+    if source_candidates:
         preferred_fragment_length = max(
             required_fragment_length,
             math.ceil(
@@ -1234,7 +1237,7 @@ def split_lyric_result(
         )
         preferred_boundary = _choose_balanced_boundary(
             cleaned,
-            space_candidates,
+            source_candidates,
             max_length,
             preferred_fragment_length,
         )
@@ -1244,11 +1247,11 @@ def split_lyric_result(
                 preferred_boundary,
             ) or (cleaned, "")
             return SplitResult(f"{left}//{right}" if right else left)
-        for space_boundary in space_candidates:
+        for source_boundary in source_candidates:
             word_candidates = _without_equivalent_split(
                 cleaned,
                 word_candidates,
-                space_boundary,
+                source_boundary,
             )
 
     word_boundary = _choose_balanced_boundary(
@@ -1270,11 +1273,11 @@ def split_lyric_result(
             left, right = _split_parts(cleaned, word_boundary) or (cleaned, "")
             return SplitResult(f"{left}//{right}" if right else left)
     whitespace_candidates = cleaning.original_whitespace_boundaries
-    for space_boundary in space_candidates:
+    for source_boundary in source_candidates:
         whitespace_candidates = _without_equivalent_split(
             cleaned,
             whitespace_candidates,
-            space_boundary,
+            source_boundary,
         )
     whitespace_boundary = _choose_balanced_boundary(
         cleaned,
@@ -1295,11 +1298,11 @@ def split_lyric_result(
             left, right = _split_parts(cleaned, whitespace_boundary) or (cleaned, "")
             return SplitResult(f"{left}//{right}" if right else left)
     character_candidates = _character_boundaries(cleaned)
-    for space_boundary in space_candidates:
+    for source_boundary in source_candidates:
         character_candidates = _without_equivalent_split(
             cleaned,
             character_candidates,
-            space_boundary,
+            source_boundary,
         )
     character_boundary = _choose_balanced_boundary(
         cleaned,
