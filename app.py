@@ -727,7 +727,9 @@ with st.expander("Expected input format", expanded=False):
         """
 - A title at the top.
 - Either one single-language set of lyric sections, or one complete Chinese block and one complete Dutch block.
-- Section headings such as `Verse 1`, `Chorus 1`, `Bridge`, or `Refrein 1`.
+- Section headings such as `Verse 1`, `Chorus`, `Pre-Chorus`, `Bridge`, `Intro`, `Outro`, `Tag`, `Interlude`, `End`, or `Refrein 1`, with optional numbers and square brackets. Short headings use brackets, such as `[V1]`, `[C]`, or `[PC]`.
+- Optional song order: write `[Order] V1 C V2 C B C`, or write `Order` with codes such as `v c v c o` on the next line. The TXT places `[Order]` directly below the title and the uppercase codes on the next line, keeping repeats. Without an order, sections stay in their written order.
+- Order codes: `V` = Verse, `V1` = Verse 1, `C` = Chorus, `C2` = Chorus 2, `PC` = Pre-Chorus, `B` = Bridge, `I` = Intro, `O` = Outro, `T` = Tag, `IL` = Interlude, `E` = End. Numbers can identify other numbered sections, such as `PC2` or `B2`.
 - Bilingual blocks may have **different numbers of sections or lyric lines**.
 - For bilingual songs, you manually confirm which sections and exact line ranges are translations of each other.
 - No API key, subscription, cloud AI, or paid service is used.

@@ -65,6 +65,7 @@ _KIND_ALIASES = {
     "bridge": "Bridge",
     "pre-chorus": "Pre-Chorus",
     "pre chorus": "Pre-Chorus",
+    "prechorus": "Pre-Chorus",
     "intro": "Intro",
     "outro": "Outro",
     "end": "End",
@@ -74,9 +75,30 @@ _KIND_ALIASES = {
 
 _HEADING_RE = re.compile(
     r"^\s*\[?\s*(?P<kind>title|verse|couplet|chorus|refrein|refrain|bridge|"
-    r"pre[- ]chorus|intro|outro|end|interlude|tag)\s*(?P<number>\d+)?\s*\]?\s*:?\s*$",
+    r"pre[- ]?chorus|intro|outro|end|interlude|tag)\s*(?P<number>\d+)?\s*\]?\s*:?\s*$",
     re.IGNORECASE,
 )
+
+_SECTION_CODES = {
+    "V": "Verse",
+    "C": "Chorus",
+    "PC": "Pre-Chorus",
+    "B": "Bridge",
+    "I": "Intro",
+    "O": "Outro",
+    "T": "Tag",
+    "IL": "Interlude",
+    "E": "End",
+}
+_CODE_HEADING_RE = re.compile(
+    r"^\s*\[\s*(?P<code>PC|IL|[VCBIOTE])\s*(?P<number>\d+)?\s*\]\s*:?\s*$",
+    re.IGNORECASE,
+)
+_ORDER_HEADING_RE = re.compile(
+    r"^(?:\[\s*order\s*\]\s*:?\s*|order(?:\s*:\s*|\s+|$))(?P<codes>.*?)\s*$",
+    re.IGNORECASE,
+)
+_ORDER_CODE_RE = re.compile(r"(?:PC|IL|[VCBIOTE])\d*", re.IGNORECASE)
 
 
 def _clean_line(line: str) -> str:
@@ -89,6 +111,10 @@ def _clean_line(line: str) -> str:
 
 
 def _match_heading(line: str) -> tuple[str, int | None] | None:
+    code_match = _CODE_HEADING_RE.match(line)
+    if code_match:
+        number = int(code_match.group("number")) if code_match.group("number") else None
+        return _SECTION_CODES[code_match.group("code").upper()], number
     match = _HEADING_RE.match(line)
     if not match:
         return None
@@ -99,6 +125,69 @@ def _match_heading(line: str) -> tuple[str, int | None] | None:
     kind = _KIND_ALIASES[normalized_key]
     number = int(match.group("number")) if match.group("number") else None
     return kind, number
+
+
+def _extract_song_order(lines: list[str]) -> tuple[list[str], tuple[str, ...]]:
+    """Keep song-order metadata out of title and lyric language detection."""
+    content_lines: list[str] = []
+    song_order: tuple[str, ...] = ()
+    order_codes: list[str] | None = None
+
+    def add_codes(text: str) -> None:
+        assert order_codes is not None
+        tokens = text.split()
+        invalid = [token for token in tokens if not _ORDER_CODE_RE.fullmatch(token)]
+        if invalid:
+            raise ParseError(
+                f"[Order] contains an unrecognized code: {invalid[0]!r}. "
+                "Use space-separated codes such as V1 C V2 C PC B I O T "
+                "(IL for Interlude or E for End), followed by a section heading."
+            )
+        order_codes.extend(token.upper() for token in tokens)
+
+    def finish_order() -> None:
+        nonlocal song_order, order_codes
+        if order_codes is None:
+            return
+        if not order_codes:
+            raise ParseError("[Order] needs section codes, for example: [Order] V1 C V2 C B C.")
+        next_order = tuple(order_codes)
+        if song_order and song_order != next_order:
+            raise ParseError(
+                "The document contains different [Order] lists. Keep one song order "
+                "below the title, or make the repeated lists identical."
+            )
+        song_order = next_order
+        order_codes = None
+
+    for line in lines:
+        order_heading = _ORDER_HEADING_RE.match(line)
+        if order_heading:
+            # A normal lyric such as 'Order my steps' is not metadata. An
+            # explicit bracket or colon, or a valid code list, identifies it.
+            codes = order_heading.group("codes")
+            explicit = (
+                line.startswith("[")
+                or bool(re.match(r"order\s*:", line, re.IGNORECASE))
+                or not codes
+            )
+            valid_codes = all(_ORDER_CODE_RE.fullmatch(token) for token in codes.split())
+            if explicit or valid_codes:
+                finish_order()
+                order_codes = []
+                add_codes(codes)
+                continue
+
+        if order_codes is not None:
+            if _match_heading(line):
+                finish_order()
+            else:
+                add_codes(line)
+                continue
+        content_lines.append(line)
+
+    finish_order()
+    return content_lines, song_order
 
 
 def _display_label(kind: str, number: int | None) -> str:
@@ -289,6 +378,7 @@ def parse_lyrics(text: str) -> ParsedLyrics:
     lines = [_clean_line(line) for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
     if not any(lines):
         raise ParseError("The source text is empty.")
+    lines, song_order = _extract_song_order(lines)
 
     title_lines: list[str] = []
     raw_sections: list[tuple[str, int | None, list[str]]] = []
@@ -386,4 +476,5 @@ def parse_lyrics(text: str) -> ParsedLyrics:
         sections=tuple(sections),
         warnings=tuple(warnings),
         mode=mode,
+        song_order=song_order,
     )

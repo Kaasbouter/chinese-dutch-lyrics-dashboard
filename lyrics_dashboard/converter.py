@@ -54,7 +54,9 @@ def derive_output_filename(
         if line.casefold() == "[title]":
             collecting_title = True
             continue
-        if line.startswith("[") and line.endswith("]"):
+        if (line.startswith("[") and line.endswith("]")) or re.match(
+            r"^\[\s*order\s*\]", line, flags=re.IGNORECASE
+        ):
             break
         if collecting_title:
             if not line and title_lines:
@@ -128,6 +130,17 @@ def _format_title(parsed: ParsedLyrics, separator: str) -> list[str]:
     return ["[Title]", title, ""]
 
 
+def _format_header(parsed: ParsedLyrics, settings: ConversionSettings) -> list[str]:
+    output = _format_title(parsed, settings.title_separator) if settings.include_title else []
+    if parsed.song_order:
+        # Keep the playback metadata next to the title, outside lyric cleaning
+        # and splitting. Repeated codes are intentional repeats in the song.
+        if output and output[-1] == "":
+            output.pop()
+        output.extend(["[Order]", " ".join(parsed.song_order), ""])
+    return output
+
+
 def _join_source_lines(section: Section, indices: tuple[int, ...]) -> str:
     separator = "" if section.language == "zh" else " "
     return separator.join(section.lines[index].strip() for index in indices).strip()
@@ -158,9 +171,7 @@ def _convert_single_language(
         settings.chinese_max_length if language == "zh" else settings.dutch_max_length
     )
     first_side_limit = derive_first_side_limit(normal_limit)
-    output: list[str] = []
-    if settings.include_title:
-        output.extend(_format_title(parsed, settings.title_separator))
+    output = _format_header(parsed, settings)
 
     for section in parsed.sections:
         if section.language != language:
@@ -206,9 +217,7 @@ def convert_lyrics(
         raise ValueError("switch_index is outside the detected section range.")
     validate_alignment_plan(parsed, alignment_plan)
 
-    output: list[str] = []
-    if settings.include_title:
-        output.extend(_format_title(parsed, settings.title_separator))
+    output = _format_header(parsed, settings)
 
     for section in parsed.sections:
         alignment = alignment_plan.for_section(section.original_index)

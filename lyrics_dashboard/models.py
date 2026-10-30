@@ -26,6 +26,7 @@ class ParsedLyrics:
     sections: tuple[Section, ...]
     warnings: tuple[str, ...] = ()
     mode: ConversionMode = "bilingual"
+    song_order: tuple[str, ...] = ()
 
     @property
     def single_language(self) -> Language | None:

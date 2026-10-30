@@ -91,9 +91,39 @@ No Dutch reference syntax needs to be typed. The user must still review every ca
 - XLSX
 - TXT, MD, CSV, JSON, XML and HTML
 
-The document must use recognizable headings such as `Verse 1`, `Chorus 1`, `Bridge`, or `Refrein 1`.
+The document must use recognizable headings such as `Verse 1`, `Chorus`, `Pre-Chorus`, `Bridge`, `Intro`, `Outro`, `Tag`, `Interlude`, or `Refrein 1`. Headings accept optional numbers and square brackets, regardless of capitalization. `Pre Chorus` and `Prechorus` also work. Bracketed shorthand headings such as `[V1]`, `[C]`, and `[PC]` become `[Verse 1]`, `[Chorus]`, and `[Pre-Chorus]` in the output. Use brackets for short headings; a standalone lyric such as `I` remains lyric text.
 
 Standalone `End` is also recognized as an Outro section heading, including case-insensitive and square-bracket forms such as `END`, `end`, `[End]`, and numbered forms such as `End 1`, `End 2`, or `[End 1]`. Output preserves the name as `[End]` (or `[End 1]` when numbered). Its following lyric lines determine the section language; the heading itself is excluded from language detection. The word `end` within a lyric sentence remains lyric text. This applies to both pasted text and uploaded files.
+
+## Song order
+
+Uploaded documents and pasted text can include an optional song order below the title. Use `[Order] V1 C V2 C B C`, or put `Order` on its own line followed by codes such as `v c v c o`. Codes are case-insensitive; repeats and their sequence are preserved. Order information is kept separate from the title and lyric lines, so it does not affect language detection or translation matching.
+
+| Code | Section |
+| --- | --- |
+| `V` / `V1` | Verse / Verse 1 |
+| `C` / `C2` | Chorus / Chorus 2 |
+| `PC` | Pre-Chorus |
+| `B` | Bridge |
+| `I` | Intro |
+| `O` | Outro |
+| `T` | Tag |
+| `IL` | Interlude |
+| `E` | End |
+
+Numbered variants such as `V2`, `PC2`, and `B2` refer to the corresponding numbered sections. The preview and downloaded TXT put `[Order]` directly below the title, with the uppercase codes on the next line:
+
+```text
+[Title]
+135 人算什麼
+[Order]
+V C V C O
+
+[Verse]
+耶和華我們的主
+```
+
+The section bodies remain in their written order; the codes below `[Order]` tell the song player which sections to repeat. Without a supplied order, no `[Order]` section is added. You can edit the order in the final preview and click **UPDATE** to save it with the TXT.
 
 ## Pasting song text
 
@@ -119,7 +149,7 @@ For DOCX uploads, a paragraph containing a hyperlink object in this leading area
 - All Unicode punctuation is removed from title and lyric content before length checks. This includes Western and Chinese commas, stops, quotes, brackets, dashes, ellipses, and other Unicode punctuation categories.
 - Whitespace left after cleaning is trimmed and collapsed without joining Dutch words.
 - Separator spaces created only to keep punctuation-separated words apart are not ordinary split candidates. Original Chinese lyric commas (`，` and `,`) are the sole punctuation-position exception: their positions are remembered through cleaning for the source-boundary priority described below. Punctuation removal itself remains unchanged, and Dutch/English punctuation positions do not gain split priority.
-- Generated structural markers such as `[Title]`, `[Verse 1]`, bilingual `|`, and `//` are added after cleaning and remain intact.
+- Generated structural markers such as `[Title]`, `[Order]`, `[Verse 1]`, bilingual `|`, and `//` are added after cleaning and remain intact.
 - A cleaned lyric receives no `//` when it is within the applicable first- or second-side limit.
 - First-side safe boundaries are accepted only when both fragments contain at least two characters and at least 25% of the cleaned text. This prevents the lower limit from creating tiny fragments. Dutch remains unsplit when no acceptable word-safe boundary exists; Chinese retains its existing warned character fallback.
 - After the existing length check requires a split, a long Chinese lyric first considers all original source spaces and original commas (`，` and `,`) together with equal highest priority. Comma positions are carried through punctuation removal and whitespace normalization without reinserting commas or adding artificial spaces. A comma adjacent to whitespace forms one logical boundary, and repeated whitespace or comma runs are deduplicated. The existing maximum-length-first, balance, midpoint, and position ranking selects the best boundary regardless of its type; the selected boundary becomes `//` without surrounding spaces, and unselected commas remain removed. Both fragments must contain text and pass the unchanged minimum-fragment and 25% balance safeguards. Chinese pronoun, coverb, grammatical-chain, `jieba`, and fallback candidates cannot displace an otherwise valid source space or comma. Only when no source boundary qualifies does ordinary Chinese splitting continue, without reconsidering an equivalent rejected boundary. For example, `祢的慈愛永不止息，祢的恩典直到永遠` can become `祢的慈愛永不止息//祢的恩典直到永遠` when a split is already required. Short lines remain unsplit; the thresholds, including the existing single-space separator allowance, are unchanged. This applies on either side of `|` and in Chinese-only mode.
