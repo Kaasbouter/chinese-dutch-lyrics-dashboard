@@ -102,10 +102,26 @@ def test_punctuation_cleanup_retains_only_internal_dutch_lyric_commas() -> None:
     assert "Groot is Uw trouw, o Heer|祢信實何廣大" in output
 
 
-def test_grouped_dutch_lyrics_drop_each_original_line_ending_comma() -> None:
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    (
+        (
+            "Wij zingen, voor de Heer,\nwij danken U, geliefde Vader,",
+            "Wij zingen, voor de Heer wij danken U, geliefde Vader",
+        ),
+        (
+            "We sing, for the Lord,\nwe thank you, beloved Father,",
+            "We sing, for the Lord we thank you, beloved Father",
+        ),
+    ),
+    ids=["dutch", "english"],
+)
+def test_grouped_latin_lyrics_drop_each_original_line_ending_comma(
+    source: str, expected: str,
+) -> None:
     parsed = parse_lyrics(
         "Verse 1\n恩典，永不止息,\n\n"
-        "Verse 2\nWij zingen, voor de Heer,\nwij danken U, geliefde Vader,\n"
+        f"Verse 2\n{source}\n"
     )
     plan = build_exact_manual_plan(
         parsed,
@@ -122,8 +138,7 @@ def test_grouped_dutch_lyrics_drop_each_original_line_ending_comma() -> None:
     )
 
     chinese = "恩典永不止息"
-    dutch = "Wij zingen, voor de Heer wij danken U, geliefde Vader"
-    assert output == f"[Verse 1]\n{chinese}|{dutch}\n\n[Verse 2]\n{dutch}|{chinese}\n"
+    assert output == f"[Verse 1]\n{chinese}|{expected}\n\n[Verse 2]\n{expected}|{chinese}\n"
 
 
 # Requirement 2

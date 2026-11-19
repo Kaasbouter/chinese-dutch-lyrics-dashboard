@@ -7,25 +7,6 @@ from dataclasses import dataclass
 from typing import Literal
 
 LanguageCode = Literal["zh", "nl"]
-LatinLyricLanguage = Literal["auto", "nl", "other"]
-
-_DUTCH_LYRIC_WORDS = frozenset(
-    "als alleen bent blijft daarmee dank doorheen een eeuwig gebed geboren geef geen "
-    "gegaan genade gezongen geloof groot hallo hebt heeft heilig heerlijk heer hemel het "
-    "hoe houd ik jezus jou jouw jullie koning kracht kribbe laat leven liefde liefheb "
-    "liefhebt liggen liggend luister maakt maar mij mijn neem niet nooit ontferming "
-    "onze ons opdat samen schenkt schenk stilte steeds taal toch trouw tegen uit uw "
-    "vader vandaag vindt voor vrede waarom waar wacht waren wereld werd "
-    "wij wijs wordt zal zegen zijn zij zing zingen zonder zullen".split()
-)
-_ENGLISH_LYRIC_WORDS = frozenset(
-    "all alone always am and are be because bless child come could day dear down each ever "
-    "every faithful father for forever from glory grace hallelujah has have heaven here "
-    "him hold holy hope how i into just know let life light listen lord love me mercy more my "
-    "never not now oh only our peace praise pray rise shall sing still take than that the their "
-    "them then there these they this those thou through together too unto upon very voice wait "
-    "walk was were what when where who why will with without world worthy would yes you your".split()
-)
 
 _SCHEME_URL_RE = re.compile(r"^(?:https?|ftp)://[^\s<>]+$", re.IGNORECASE)
 _WWW_URL_RE = re.compile(r"^www\.[^\s<>]+$", re.IGNORECASE)
@@ -184,39 +165,17 @@ def _is_punctuation(character: str) -> bool:
     return unicodedata.category(character).startswith("P")
 
 
-def guess_latin_lyric_language(text: str) -> Literal["nl", "other"] | None:
-    """Use distinct Dutch and English words as hints within the Latin group."""
-    words = set(re.findall(r"[^\W\d_]+", text.casefold()))
-    dutch = len(words & _DUTCH_LYRIC_WORDS)
-    english = len(words & _ENGLISH_LYRIC_WORDS)
-    if dutch > english:
-        return "nl"
-    if english:
-        return "other"
-    return None
-
-
-def dutch_lyric_comma_indices(
-    text: str,
-    language: LatinLyricLanguage,
-    *,
-    dutch_context: bool,
-) -> frozenset[int]:
+def _interior_comma_indices(text: str) -> frozenset[int]:
     """Find commas with lyric content on both sides of the same source line."""
-    if language == "other" or "," not in text:
+    if "," not in text:
         return frozenset()
 
     indices: set[int] = set()
-    next_offset = 0
-    for line in text.split("\n"):
-        offset = next_offset
-        next_offset += len(line) + 1
+    for match in re.finditer(r"[^\n]+", text):
+        line = match.group()
         if "," not in line:
             continue
-        if language == "auto":
-            hint = guess_latin_lyric_language(line)
-            if hint == "other" or (hint is None and not dutch_context):
-                continue
+        offset = match.start()
         content = [
             index for index, character in enumerate(line)
             if not (character.isspace() or _is_punctuation(character))
@@ -338,7 +297,7 @@ def clean_content_result(
     text: str,
     language: LanguageCode,
     *,
-    retained_comma_indices: frozenset[int] = frozenset(),
+    preserve_inner_commas: bool = False,
 ) -> CleanContentResult:
     """Clean content while tracking source whitespace and relevant comma positions.
 
@@ -348,6 +307,10 @@ def clean_content_result(
     cleaned: list[tuple[str, bool]] = []
     original_comma_positions: list[int] = []
     retained_comma_counts: dict[int, int] = {}
+    retained_comma_indices = (
+        _interior_comma_indices(text) if language == "nl" and preserve_inner_commas
+        else frozenset()
+    )
     index = 0
     while index < len(text):
         character = text[index]
@@ -364,7 +327,7 @@ def clean_content_result(
             comma in text[index:punctuation_end] for comma in (",", "，")
         ):
             original_comma_positions.append(len(cleaned))
-        if language == "nl" and retained_comma_indices:
+        if retained_comma_indices:
             retained_count = sum(
                 position in retained_comma_indices
                 for position in range(index, punctuation_end)

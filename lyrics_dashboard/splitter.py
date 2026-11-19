@@ -1173,7 +1173,7 @@ def split_lyric_result(
     *,
     minimum_fragment_length: int = 1,
     minimum_fragment_ratio: float = 0.0,
-    retained_comma_indices: frozenset[int] = frozenset(),
+    preserve_inner_commas: bool = False,
 ) -> SplitResult:
     """Clean lyric content and add at most one balanced ``//``."""
     if max_length < MINIMUM_SPLIT_LIMIT:
@@ -1186,7 +1186,7 @@ def split_lyric_result(
     cleaning = clean_content_result(
         text,
         language,
-        retained_comma_indices=retained_comma_indices,
+        preserve_inner_commas=preserve_inner_commas,
     )
     cleaned = cleaning.text
     # Keep the existing split trigger's single-space allowance separate from

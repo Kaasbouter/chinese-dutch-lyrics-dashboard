@@ -308,30 +308,16 @@ def test_dutch_commas_do_not_change_split_placement_or_length_checks(
 
 
 @pytest.mark.parametrize(
-    "dutch_context", ("", "Wij zingen samen, en prijzen onze Heer,\n"),
-)
-def test_english_txt_keeps_its_existing_comma_cleanup(dutch_context: str) -> None:
-    output = _convert(
-        f"Verse 1\n{dutch_context}O child, born to us, lying in the manger,\n",
-        ConversionSettings(dutch_max_length=80),
-    )
-
-    assert output.splitlines()[-1] == "O child born to us lying in the manger"
-
-
-@pytest.mark.parametrize(
-    ("language", "lyric", "expected"),
+    ("lyric", "expected"),
     (
-        ("nl", "Amen, amen,", "Amen, amen"),
-        ("other", "Wij zingen, voor de Heer,", "Wij zingen voor de Heer"),
+        ("O child, born to us, lying in the manger,", "O child, born to us, lying in the manger"),
+        ("Amen, amen,", "Amen, amen"),
     ),
 )
-def test_explicit_latin_lyric_language_overrides_automatic_comma_cleanup(
-    language: str, lyric: str, expected: str
-) -> None:
+def test_english_txt_preserves_commas_inside_each_lyric_line(lyric: str, expected: str) -> None:
     output = _convert(
         f"Verse 1\n{lyric}\n",
-        ConversionSettings(latin_lyric_language=language),
+        ConversionSettings(dutch_max_length=80),
     )
 
     assert output == f"[Verse 1]\n{expected}\n"

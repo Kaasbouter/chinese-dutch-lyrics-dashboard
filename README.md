@@ -23,7 +23,7 @@ Chinese word segmentation uses the free MIT-licensed `jieba` package in its stan
 4. Select the true Dutch translation section or sections for each Chinese section.
 5. Review the numbered reference panels, edit Chinese ranges, drag Dutch cards into the matching rows, and validate reciprocal coverage.
 6. Choose where the output changes from `Chinese|Dutch` to `Dutch|Chinese`.
-7. Clean punctuation and normalize whitespace. Dutch lyrics keep commas inside source lines in the preview and TXT.
+7. Clean punctuation and normalize whitespace. Lyrics in the Dutch/English Latin-script group keep commas inside source lines in the preview and TXT.
 8. Apply the existing positional length limits and add at most one word-safe `//` per language when needed.
 9. Add structural section headings and, only for bilingual songs, `|`.
 10. When you deliberately want changed mappings, language order, or splitting settings to replace the draft, click **REGENERATE AUTOMATIC PREVIEW**.
@@ -146,10 +146,9 @@ For DOCX uploads, a paragraph containing a hyperlink object in this leading area
 - From the selected switch point onward, output is `Dutch|Chinese`.
 - The configured Chinese and Dutch limits are the normal limits used after `|`. Their defaults are 10 Chinese characters and 40 Dutch characters.
 - The language before `|` uses `max(4, floor(normal limit × 0.80))`. With the defaults, that is 8 Chinese characters or 32 Dutch characters; the language after `|` remains at 10 or 40 respectively. A single-language lyric is always processed with that same stricter first-side limit despite having no `|`.
-- All Unicode punctuation is removed from title and lyric content before length checks. After splitting, commas inside Dutch source lyric lines are restored. Commas at the end of a source line are removed even when alignment joins that line with another. For example, `O kind, ons geboren, liggend in de kribbe,` becomes `O kind, ons geboren, liggend in de kribbe` before any `//` is displayed.
-- Comma handling uses local language hints in **Automatic** mode. For short or ambiguous lyrics, open **Splitting rules** and choose **Dutch** or **English or another language** under **Latin-script lyric language for commas**. Regenerate the preview after changing the setting.
+- All Unicode punctuation is removed from title and lyric content before length checks. After splitting, commas inside Latin-script source lyric lines are restored. Commas at the end of a source line are removed even when alignment joins that line with another. For example, `O kind, ons geboren, liggend in de kribbe,` becomes `O kind, ons geboren, liggend in de kribbe` before any `//` is displayed.
 - Whitespace left after cleaning is trimmed and collapsed without joining Dutch words.
-- Separator spaces created only to keep punctuation-separated words apart are excluded from ordinary split candidates. Original Chinese lyric commas (`，` and `,`) are tracked for the source-boundary priority described below. Dutch commas are restored for display and export after the split decision.
+- Separator spaces created only to keep punctuation-separated words apart are excluded from ordinary split candidates. Original Chinese lyric commas (`，` and `,`) are tracked for the source-boundary priority described below. Interior commas in Latin-script lyrics are restored for display and export after the split decision.
 - Generated structural markers such as `[Title]`, `[Order]`, `[Verse 1]`, bilingual `|`, and `//` are added after cleaning and remain intact.
 - A cleaned lyric receives no `//` when it is within the applicable first- or second-side limit.
 - First-side safe boundaries are accepted only when both fragments contain at least two characters and at least 25% of the cleaned text. This prevents the lower limit from creating tiny fragments. Dutch remains unsplit when no acceptable word-safe boundary exists; Chinese retains its existing warned character fallback.
