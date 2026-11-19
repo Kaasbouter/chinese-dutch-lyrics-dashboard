@@ -1535,7 +1535,8 @@ with st.expander("Splitting rules", expanded=False):
         key=TITLE_SEPARATOR_KEY,
     )
     st.caption(
-        "Punctuation is removed before measuring. Long Chinese uses the nearest balanced local "
+        "Punctuation is removed before measuring. The TXT keeps commas inside Latin-script "
+        "lyric lines. Long Chinese uses the nearest balanced local "
         "word-segmentation boundary; long Dutch uses the nearest whitespace boundary. Each "
         "language receives at most one `//` per output row. The final language before `|` uses "
         "80% of its normal limit, so it splits slightly sooner; the language after `|` keeps its "
