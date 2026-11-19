@@ -9,7 +9,7 @@ from typing import Iterable
 
 import jieba
 
-from .text_processing import LanguageCode, clean_content_result
+from .text_processing import CleanContentResult, LanguageCode, clean_content_result
 
 jieba.setLogLevel(logging.WARNING)
 _CHINESE_TOKENIZER = jieba.Tokenizer()
@@ -1144,6 +1144,28 @@ def _character_boundaries(text: str) -> tuple[int, ...]:
     )
 
 
+def _render_latin_split(
+    cleaning: CleanContentResult,
+    boundary: int | None = None,
+) -> SplitResult:
+    text = cleaning.text
+    comma_offsets = cleaning.retained_comma_offsets
+    if comma_offsets:
+        parts: list[str] = []
+        start = 0
+        for offset in comma_offsets:
+            parts.extend((text[start:offset], ","))
+            start = offset
+        parts.append(text[start:])
+        text = "".join(parts)
+    if boundary is None:
+        return SplitResult(text)
+    # The selected boundary is in the punctuation-free text.
+    boundary += sum(offset <= boundary for offset in comma_offsets)
+    left, right = _split_parts(text, boundary) or (text, "")
+    return SplitResult(f"{left}//{right}" if right else left)
+
+
 def split_lyric_result(
     text: str,
     language: LanguageCode,
@@ -1151,6 +1173,7 @@ def split_lyric_result(
     *,
     minimum_fragment_length: int = 1,
     minimum_fragment_ratio: float = 0.0,
+    retained_comma_indices: frozenset[int] = frozenset(),
 ) -> SplitResult:
     """Clean lyric content and add at most one balanced ``//``."""
     if max_length < MINIMUM_SPLIT_LIMIT:
@@ -1160,7 +1183,11 @@ def split_lyric_result(
     if not 0.0 <= minimum_fragment_ratio < 0.5:
         raise ValueError("Minimum fragment ratio must be between 0 and 0.5.")
 
-    cleaning = clean_content_result(text, language)
+    cleaning = clean_content_result(
+        text,
+        language,
+        retained_comma_indices=retained_comma_indices,
+    )
     cleaned = cleaning.text
     # Keep the existing split trigger's single-space allowance separate from
     # the priority given to source-space and source-comma candidates below.
@@ -1179,7 +1206,7 @@ def split_lyric_result(
         1 if single_space_boundary is not None else 0
     )
     if not cleaned or threshold_length <= max_length:
-        return SplitResult(cleaned)
+        return _render_latin_split(cleaning) if language == "nl" else SplitResult(cleaned)
     required_fragment_length = max(
         minimum_fragment_length,
         math.ceil(len(cleaned) * minimum_fragment_ratio),
@@ -1195,7 +1222,7 @@ def split_lyric_result(
             required_fragment_length,
         )
         if boundary is None:
-            return SplitResult(cleaned)
+            return _render_latin_split(cleaning)
         preferred_boundary = boundary
         boundary = _adjust_boundary_around_protected_spans(
             cleaned,
@@ -1206,7 +1233,7 @@ def split_lyric_result(
             grammatical_spans,
         )
         if boundary is None:
-            return SplitResult(cleaned)
+            return _render_latin_split(cleaning)
         boundary = _prefer_logical_latin_boundary(
             cleaned,
             boundary,
@@ -1216,8 +1243,7 @@ def split_lyric_result(
             required_fragment_length,
             grammatical_spans,
         )
-        left, right = _split_parts(cleaned, boundary) or (cleaned, "")
-        return SplitResult(f"{left}//{right}" if right else left)
+        return _render_latin_split(cleaning, boundary)
 
     word_candidates = tuple(
         boundary

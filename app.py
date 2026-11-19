@@ -36,6 +36,8 @@ CHINESE_MAX_KEY = "custom_chinese_max_length"
 DUTCH_MAX_KEY = "custom_dutch_max_length"
 SWITCH_INDEX_KEY = "custom_switch_index"
 TITLE_SEPARATOR_KEY = "custom_title_separator"
+LATIN_LYRIC_LANGUAGE_KEY = "custom_latin_lyric_language"
+LATIN_LYRIC_LANGUAGE_MEMORY_KEY = "custom_latin_lyric_language_memory"
 GENERATED_OUTPUT_KEY = "generated_output"
 EDITABLE_PREVIEW_KEY = "editable_preview"
 EDITED_OUTPUT_WIDGET_KEY = "edited_output"
@@ -86,6 +88,8 @@ def _activate_source(fingerprint: str) -> None:
             PENDING_LANGUAGES_KEY,
             EFFECTIVE_LANGUAGES_KEY,
             LANGUAGE_EDITOR_KEY,
+            LATIN_LYRIC_LANGUAGE_KEY,
+            LATIN_LYRIC_LANGUAGE_MEMORY_KEY,
             PRESERVED_ALIGNMENT_KEY,
             "refresh_section_languages",
             GENERATED_OUTPUT_KEY,
@@ -376,12 +380,37 @@ def _reconcile_language_mapping_state(
     return mappings_reset
 
 
+def _render_latin_language_setting() -> None:
+    language_labels = {
+        "auto": "Automatic",
+        "nl": "Dutch",
+        "other": "English or another language",
+    }
+    if LATIN_LYRIC_LANGUAGE_KEY not in st.session_state:
+        st.session_state[LATIN_LYRIC_LANGUAGE_KEY] = st.session_state.get(
+            LATIN_LYRIC_LANGUAGE_MEMORY_KEY, "auto",
+        )
+    st.session_state[LATIN_LYRIC_LANGUAGE_MEMORY_KEY] = st.selectbox(
+        "Latin-script lyric language for commas",
+        options=list(language_labels),
+        format_func=language_labels.__getitem__,
+        key=LATIN_LYRIC_LANGUAGE_KEY,
+        help="Dutch lyrics keep commas inside source lines. Choose the language if "
+        "automatic recognition is uncertain.",
+    )
+
+
 def _current_customization(
     parsed: ParsedLyrics,
     alignment_plan: AlignmentPlan | None,
     fingerprint: str,
 ) -> tuple[ConversionSettings, tuple[object, ...]]:
     """Build settings and their signature from the live widget state."""
+    latin_language = (
+        st.session_state[LATIN_LYRIC_LANGUAGE_KEY]
+        if parsed.single_language != "zh"
+        else "auto"
+    )
     if parsed.mode == "single-language":
         chinese_max = (
             int(st.session_state[CHINESE_MAX_KEY])
@@ -396,6 +425,7 @@ def _current_customization(
         settings = ConversionSettings(
             chinese_max_length=chinese_max,
             dutch_max_length=dutch_max,
+            latin_lyric_language=latin_language,
         )
         signature = (
             fingerprint,
@@ -404,6 +434,7 @@ def _current_customization(
             tuple(section.language for section in parsed.sections),
             chinese_max,
             dutch_max,
+            latin_language,
         )
         return settings, signature
 
@@ -416,6 +447,7 @@ def _current_customization(
         chinese_max_length=chinese_max,
         dutch_max_length=dutch_max,
         title_separator="|" if title_separator_choice.startswith("|") else " ",
+        latin_lyric_language=latin_language,
     )
     signature = (
         fingerprint,
@@ -425,6 +457,7 @@ def _current_customization(
         chinese_max,
         dutch_max,
         title_separator_choice,
+        latin_language,
     )
     return settings, signature
 
@@ -965,6 +998,7 @@ if single_language_mode:
                 key=DUTCH_MAX_KEY,
             )
             normal_limit = int(dutch_max)
+            _render_latin_language_setting()
         st.caption(
             "Punctuation is removed before measuring. The sole language is treated as the "
             "first output side and therefore uses the existing stricter 80% limit, even "
@@ -1534,6 +1568,7 @@ with st.expander("Splitting rules", expanded=False):
         index=0,
         key=TITLE_SEPARATOR_KEY,
     )
+    _render_latin_language_setting()
     st.caption(
         "Punctuation is removed before measuring. Long Chinese uses the nearest balanced local "
         "word-segmentation boundary; long Dutch uses the nearest whitespace boundary. Each "

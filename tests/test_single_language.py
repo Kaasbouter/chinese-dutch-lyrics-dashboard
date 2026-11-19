@@ -264,9 +264,77 @@ def test_single_language_preserves_cleaning_and_utf8_export_identity() -> None:
     preview = convert_lyrics(parsed, None, ConversionSettings())
     downloaded = encode_utf8_txt(preview)
 
-    assert preview == "[Title]\nTitle\n\n[Verse 1]\nGroot is Uw trouw\n"
+    assert preview == "[Title]\nTitle\n\n[Verse 1]\nGroot is, Uw trouw\n"
     assert downloaded.decode("utf-8") == preview
     assert "|" not in preview
+
+
+def test_dutch_txt_preserves_commas_inside_each_lyric_line() -> None:
+    source = (
+        "[Title]\nO kind, ons geboren\n\n"
+        "Verse 6\n"
+        "O kind, ons geboren, liggend in de kribbe,\n"
+        "neem onze liefd' in genade aan!\n"
+        "U, die ons liefhebt, U behoort ons harte!\n"
+    )
+
+    output = _convert(source, ConversionSettings(dutch_max_length=80))
+
+    assert encode_utf8_txt(output) == (
+        "[Title]\nO kind ons geboren\n\n"
+        "[Verse 6]\n"
+        "O kind, ons geboren, liggend in de kribbe\n"
+        "neem onze liefd in genade aan\n"
+        "U, die ons liefhebt, U behoort ons harte\n"
+    ).encode("utf-8")
+
+
+@pytest.mark.parametrize(
+    ("maximum", "expected"),
+    (
+        (20, "Wij zingen samen,//voor de Heer"),
+        (37, "Wij zingen samen, voor de Heer"),
+    ),
+)
+def test_dutch_commas_do_not_change_split_placement_or_length_checks(
+    maximum: int, expected: str
+) -> None:
+    output = _convert(
+        "Verse 1\nWij zingen samen, voor de Heer,\n",
+        ConversionSettings(dutch_max_length=maximum),
+    )
+
+    assert output == f"[Verse 1]\n{expected}\n"
+
+
+@pytest.mark.parametrize(
+    "dutch_context", ("", "Wij zingen samen, en prijzen onze Heer,\n"),
+)
+def test_english_txt_keeps_its_existing_comma_cleanup(dutch_context: str) -> None:
+    output = _convert(
+        f"Verse 1\n{dutch_context}O child, born to us, lying in the manger,\n",
+        ConversionSettings(dutch_max_length=80),
+    )
+
+    assert output.splitlines()[-1] == "O child born to us lying in the manger"
+
+
+@pytest.mark.parametrize(
+    ("language", "lyric", "expected"),
+    (
+        ("nl", "Amen, amen,", "Amen, amen"),
+        ("other", "Wij zingen, voor de Heer,", "Wij zingen voor de Heer"),
+    ),
+)
+def test_explicit_latin_lyric_language_overrides_automatic_comma_cleanup(
+    language: str, lyric: str, expected: str
+) -> None:
+    output = _convert(
+        f"Verse 1\n{lyric}\n",
+        ConversionSettings(latin_lyric_language=language),
+    )
+
+    assert output == f"[Verse 1]\n{expected}\n"
 
 
 def test_single_chinese_punctuation_removal_keeps_all_lyric_characters() -> None:

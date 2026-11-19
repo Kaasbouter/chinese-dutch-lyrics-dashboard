@@ -9,7 +9,12 @@ from .alignment import validate_alignment_plan
 from .errors import PairingError
 from .models import AlignmentPlan, ParsedLyrics, Section
 from .splitter import MINIMUM_SPLIT_LIMIT, split_lyric_result
-from .text_processing import clean_content_text
+from .text_processing import (
+    LatinLyricLanguage,
+    clean_content_text,
+    dutch_lyric_comma_indices,
+    guess_latin_lyric_language,
+)
 
 FIRST_SIDE_LIMIT_RATIO = 0.80
 FIRST_SIDE_MINIMUM_FRAGMENT_RATIO = 0.25
@@ -23,6 +28,7 @@ class ConversionSettings:
     dutch_max_length: int = 40
     include_title: bool = True
     title_separator: str = " "
+    latin_lyric_language: LatinLyricLanguage = "auto"
 
 
 def derive_first_side_limit(normal_limit: int) -> int:
@@ -142,7 +148,8 @@ def _format_header(parsed: ParsedLyrics, settings: ConversionSettings) -> list[s
 
 
 def _join_source_lines(section: Section, indices: tuple[int, ...]) -> str:
-    separator = "" if section.language == "zh" else " "
+    # Latin source line breaks normalize to spaces after identifying ending commas.
+    separator = "" if section.language == "zh" else "\n"
     return separator.join(section.lines[index].strip() for index in indices).strip()
 
 
@@ -152,9 +159,9 @@ def _join_translation_lines(parsed: ParsedLyrics, references) -> str:
     for reference in references:
         section = parsed.sections[reference.section_index]
         language = language or section.language
-        separator = "" if section.language == "zh" else " "
+        separator = "" if section.language == "zh" else "\n"
         pieces.append(separator.join(section.lines[index].strip() for index in reference.line_indices))
-    outer_separator = "" if language == "zh" else " "
+    outer_separator = "" if language == "zh" else "\n"
     return outer_separator.join(piece.strip() for piece in pieces if piece.strip()).strip()
 
 
@@ -162,6 +169,8 @@ def _convert_single_language(
     parsed: ParsedLyrics,
     settings: ConversionSettings,
     warnings: list[str] | None,
+    *,
+    dutch_context: bool,
 ) -> str:
     language = parsed.single_language
     if language not in ("zh", "nl"):
@@ -186,6 +195,15 @@ def _convert_single_language(
                 first_side_limit,
                 minimum_fragment_length=MINIMUM_FIRST_SIDE_FRAGMENT_LENGTH,
                 minimum_fragment_ratio=FIRST_SIDE_MINIMUM_FRAGMENT_RATIO,
+                retained_comma_indices=(
+                    dutch_lyric_comma_indices(
+                        source_text,
+                        settings.latin_lyric_language,
+                        dutch_context=dutch_context,
+                    )
+                    if language == "nl"
+                    else frozenset()
+                ),
             )
             if result.used_character_fallback and warnings is not None:
                 warning = (
@@ -209,8 +227,23 @@ def convert_lyrics(
     warnings: list[str] | None = None,
 ) -> str:
     """Create TXT from parser-approved single lyrics or validated bilingual matches."""
+    dutch_context = settings.latin_lyric_language == "auto" and (
+        guess_latin_lyric_language(
+            "\n".join(
+                line
+                for section in parsed.sections
+                if section.language == "nl"
+                for line in section.lines
+            )
+        ) == "nl"
+    )
     if parsed.mode == "single-language":
-        return _convert_single_language(parsed, settings, warnings)
+        return _convert_single_language(
+            parsed,
+            settings,
+            warnings,
+            dutch_context=dutch_context,
+        )
     if alignment_plan is None:
         raise PairingError("Bilingual conversion requires a validated alignment plan.")
     if settings.switch_index is not None and not 0 <= settings.switch_index < len(parsed.sections):
@@ -260,6 +293,11 @@ def convert_lyrics(
                 minimum_fragment_length=dutch_minimum_fragment,
                 minimum_fragment_ratio=(
                     FIRST_SIDE_MINIMUM_FRAGMENT_RATIO if dutch_first else 0.0
+                ),
+                retained_comma_indices=dutch_lyric_comma_indices(
+                    dutch_text,
+                    settings.latin_lyric_language,
+                    dutch_context=dutch_context,
                 ),
             )
             if chinese_result.used_character_fallback and warnings is not None:

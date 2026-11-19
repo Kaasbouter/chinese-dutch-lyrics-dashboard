@@ -120,9 +120,8 @@ def test_converter_switches_order_at_selected_original_section() -> None:
     assert "|祢信實" in dutch_verse.splitlines()[0]
 
 
-def test_representative_bilingual_output_remains_byte_for_byte_unchanged() -> None:
-    # Keep this regression focused on unrelated output rules; numbered titles
-    # are covered separately because their prefix must now remain in the output.
+def test_representative_bilingual_output_only_adds_dutch_commas() -> None:
+    # Numbered titles are covered separately.
     parsed = parse_lyrics(SOURCE.removeprefix("1 "))
     output = convert_lyrics(
         parsed,
@@ -130,7 +129,8 @@ def test_representative_bilingual_output_remains_byte_for_byte_unchanged() -> No
         ConversionSettings(switch_index=3, chinese_max_length=10, dutch_max_length=40),
     )
 
-    assert hashlib.sha256(output.encode("utf-8")).hexdigest() == (
+    assert "," in output
+    assert hashlib.sha256(output.replace(",", "").encode("utf-8")).hexdigest() == (
         "fadb1dfc2dba342677582a927c809382cdd79f4c495d79bccc3fd917b11ce1c6"
     )
 

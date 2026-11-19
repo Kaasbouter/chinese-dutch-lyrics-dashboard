@@ -13,6 +13,7 @@ from lyrics_dashboard.models import (
     Section,
     TranslationReference,
 )
+from lyrics_dashboard.parser import parse_lyrics
 from lyrics_dashboard.splitter import split_lyric
 
 
@@ -78,12 +79,12 @@ def _single_pair(
 
 
 # Requirement 1
-def test_western_punctuation_is_removed_from_title_and_lyric_content() -> None:
+def test_punctuation_cleanup_retains_only_internal_dutch_lyric_commas() -> None:
     parsed, plan = _single_pair(
         chinese="祢信實,何廣大!",
         dutch='Groot-is "Uw" trouw, o Heer.',
         chinese_title="中文(歌名)!",
-        dutch_title='Nederlandse: "titel".',
+        dutch_title='Nederlandse, "titel".',
     )
 
     output = convert_lyrics(
@@ -97,8 +98,32 @@ def test_western_punctuation_is_removed_from_title_and_lyric_content() -> None:
     )
 
     assert "[Title]\n中文歌名 Nederlandse titel" in output
-    assert "祢信實何廣大|Groot is Uw trouw o Heer" in output
-    assert "Groot is Uw trouw o Heer|祢信實何廣大" in output
+    assert "祢信實何廣大|Groot is Uw trouw, o Heer" in output
+    assert "Groot is Uw trouw, o Heer|祢信實何廣大" in output
+
+
+def test_grouped_dutch_lyrics_drop_each_original_line_ending_comma() -> None:
+    parsed = parse_lyrics(
+        "Verse 1\n恩典，永不止息,\n\n"
+        "Verse 2\nWij zingen, voor de Heer,\nwij danken U, geliefde Vader,\n"
+    )
+    plan = build_exact_manual_plan(
+        parsed,
+        selections={0: (1,)},
+        line_groups_by_chinese={
+            0: (AlignedLine((0,), (TranslationReference(1, (0, 1)),)),)
+        },
+    )
+
+    output = convert_lyrics(
+        parsed,
+        plan,
+        ConversionSettings(switch_index=1, dutch_max_length=80),
+    )
+
+    chinese = "恩典永不止息"
+    dutch = "Wij zingen, voor de Heer wij danken U, geliefde Vader"
+    assert output == f"[Verse 1]\n{chinese}|{dutch}\n\n[Verse 2]\n{dutch}|{chinese}\n"
 
 
 # Requirement 2

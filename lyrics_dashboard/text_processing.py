@@ -7,6 +7,25 @@ from dataclasses import dataclass
 from typing import Literal
 
 LanguageCode = Literal["zh", "nl"]
+LatinLyricLanguage = Literal["auto", "nl", "other"]
+
+_DUTCH_LYRIC_WORDS = frozenset(
+    "als alleen bent blijft daarmee dank doorheen een eeuwig gebed geboren geef geen "
+    "gegaan genade gezongen geloof groot hallo hebt heeft heilig heerlijk heer hemel het "
+    "hoe houd ik jezus jou jouw jullie koning kracht kribbe laat leven liefde liefheb "
+    "liefhebt liggen liggend luister maakt maar mij mijn neem niet nooit ontferming "
+    "onze ons opdat samen schenkt schenk stilte steeds taal toch trouw tegen uit uw "
+    "vader vandaag vindt voor vrede waarom waar wacht waren wereld werd "
+    "wij wijs wordt zal zegen zijn zij zing zingen zonder zullen".split()
+)
+_ENGLISH_LYRIC_WORDS = frozenset(
+    "all alone always am and are be because bless child come could day dear down each ever "
+    "every faithful father for forever from glory grace hallelujah has have heaven here "
+    "him hold holy hope how i into just know let life light listen lord love me mercy more my "
+    "never not now oh only our peace praise pray rise shall sing still take than that the their "
+    "them then there these they this those thou through together too unto upon very voice wait "
+    "walk was were what when where who why will with without world worthy would yes you your".split()
+)
 
 _SCHEME_URL_RE = re.compile(r"^(?:https?|ftp)://[^\s<>]+$", re.IGNORECASE)
 _WWW_URL_RE = re.compile(r"^www\.[^\s<>]+$", re.IGNORECASE)
@@ -65,6 +84,7 @@ class CleanContentResult:
     original_whitespace_boundaries: tuple[int, ...] = ()
     punctuation_separator_boundaries: tuple[int, ...] = ()
     original_comma_boundaries: tuple[int, ...] = ()
+    retained_comma_offsets: tuple[int, ...] = ()
 
 
 def is_standalone_url_line(line: str) -> bool:
@@ -164,6 +184,52 @@ def _is_punctuation(character: str) -> bool:
     return unicodedata.category(character).startswith("P")
 
 
+def guess_latin_lyric_language(text: str) -> Literal["nl", "other"] | None:
+    """Use distinct Dutch and English words as hints within the Latin group."""
+    words = set(re.findall(r"[^\W\d_]+", text.casefold()))
+    dutch = len(words & _DUTCH_LYRIC_WORDS)
+    english = len(words & _ENGLISH_LYRIC_WORDS)
+    if dutch > english:
+        return "nl"
+    if english:
+        return "other"
+    return None
+
+
+def dutch_lyric_comma_indices(
+    text: str,
+    language: LatinLyricLanguage,
+    *,
+    dutch_context: bool,
+) -> frozenset[int]:
+    """Find commas with lyric content on both sides of the same source line."""
+    if language == "other" or "," not in text:
+        return frozenset()
+
+    indices: set[int] = set()
+    next_offset = 0
+    for line in text.split("\n"):
+        offset = next_offset
+        next_offset += len(line) + 1
+        if "," not in line:
+            continue
+        if language == "auto":
+            hint = guess_latin_lyric_language(line)
+            if hint == "other" or (hint is None and not dutch_context):
+                continue
+        content = [
+            index for index, character in enumerate(line)
+            if not (character.isspace() or _is_punctuation(character))
+        ]
+        if content:
+            indices.update(
+                offset + index
+                for index in range(content[0] + 1, content[-1])
+                if line[index] == ","
+            )
+    return frozenset(indices)
+
+
 def _is_cjk(character: str) -> bool:
     codepoint = ord(character)
     return (
@@ -199,13 +265,15 @@ def _punctuation_needs_separator(previous: str, following: str) -> bool:
 
 def _normalize_whitespace(
     characters: list[tuple[str, bool]],
-    original_comma_positions: Collection[int] = (),
+    original_comma_positions: Collection[int],
+    retained_comma_counts: dict[int, int],
 ) -> CleanContentResult:
     normalized: list[str] = []
     original_boundaries: list[int] = []
     punctuation_boundaries: list[int] = []
     comma_positions = set(original_comma_positions)
     comma_boundaries: list[int] = []
+    retained_comma_offsets: list[int] = []
     index = 0
 
     while index < len(characters):
@@ -230,6 +298,12 @@ def _normalize_whitespace(
 
         if normalized and whitespace_end < len(characters):
             separator_start = len(normalized)
+            if retained_comma_counts:
+                comma_count = sum(
+                    retained_comma_counts.get(position, 0)
+                    for position in range(index, whitespace_end)
+                )
+                retained_comma_offsets.extend([separator_start] * comma_count)
             normalized.append(" ")
             separator_end = len(normalized)
             if has_original_whitespace:
@@ -256,20 +330,24 @@ def _normalize_whitespace(
                 if 0 < boundary < len(normalized)
             })
         ),
+        retained_comma_offsets=tuple(retained_comma_offsets),
     )
 
 
 def clean_content_result(
     text: str,
     language: LanguageCode,
+    *,
+    retained_comma_indices: frozenset[int] = frozenset(),
 ) -> CleanContentResult:
-    """Clean content while retaining source whitespace and Chinese comma positions.
+    """Clean content while tracking source whitespace and relevant comma positions.
 
     Structural output markers are intentionally not passed through this function;
     the converter adds ``[Section]``, ``|``, and ``//`` after content cleaning.
     """
     cleaned: list[tuple[str, bool]] = []
     original_comma_positions: list[int] = []
+    retained_comma_counts: dict[int, int] = {}
     index = 0
     while index < len(text):
         character = text[index]
@@ -286,13 +364,20 @@ def clean_content_result(
             comma in text[index:punctuation_end] for comma in (",", "，")
         ):
             original_comma_positions.append(len(cleaned))
+        if language == "nl" and retained_comma_indices:
+            retained_count = sum(
+                position in retained_comma_indices
+                for position in range(index, punctuation_end)
+            )
+            if retained_count:
+                retained_comma_counts[len(cleaned)] = retained_count
         previous = _previous_content_character(cleaned)
         following = _next_content_character(text, punctuation_end)
         if language == "nl" or _punctuation_needs_separator(previous, following):
             cleaned.append((" ", False))
         index = punctuation_end
 
-    return _normalize_whitespace(cleaned, original_comma_positions)
+    return _normalize_whitespace(cleaned, original_comma_positions, retained_comma_counts)
 
 
 def clean_content_text(text: str, language: LanguageCode) -> str:

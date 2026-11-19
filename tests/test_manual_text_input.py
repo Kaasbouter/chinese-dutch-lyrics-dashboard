@@ -395,6 +395,45 @@ def test_paste_source_is_separate_from_update_and_saved_txt(monkeypatch) -> None
     assert downloads[-1] == encode_utf8_txt(manual_output)
 
 
+def test_dutch_comma_override_is_applied_to_txt_after_update(monkeypatch) -> None:
+    downloads: list[bytes] = []
+    real_download_button = st.download_button
+
+    def record_download(*args, **kwargs):
+        downloads.append(kwargs["data"])
+        return real_download_button(*args, **kwargs)
+
+    monkeypatch.setattr(st, "download_button", record_download)
+    app = _process(_start_paste_mode(), "Verse 1\nAmen, amen,\n")
+    language = app.selectbox(key="custom_latin_lyric_language")
+    automatic = "[Verse 1]\nAmen amen\n"
+    dutch = "[Verse 1]\nAmen, amen\n"
+
+    assert language.value == "auto"
+    assert _final_area(app).value == automatic
+    assert downloads[-1] == automatic.encode("utf-8")
+
+    language.set_value("nl").run(timeout=20)
+    assert _final_area(app).value == automatic
+    _button(app, "REGENERATE AUTOMATIC PREVIEW").click().run(timeout=20)
+    assert _final_area(app).value == dutch
+    assert downloads[-1] == automatic.encode("utf-8")
+
+    _button(app, "UPDATE").click().run(timeout=20)
+    assert not app.exception
+    assert not app.error
+    assert downloads[-1] == dutch.encode("utf-8")
+
+    _input_choice(app).set_value("Upload file").run(timeout=20)
+    _input_choice(app).set_value("Paste text").run(timeout=20)
+    assert app.selectbox(key="custom_latin_lyric_language").value == "nl"
+    assert downloads[-1] == dutch.encode("utf-8")
+
+    _process(app, "Verse 1\nO child, born to us,\n")
+    assert app.selectbox(key="custom_latin_lyric_language").value == "auto"
+    assert downloads[-1] == b"[Verse 1]\nO child born to us\n"
+
+
 def test_equivalent_uploaded_and_pasted_text_generate_same_result() -> None:
     uploaded = AppTest.from_file(str(APP_PATH), default_timeout=20).run()
     uploaded.file_uploader[0].set_value(
