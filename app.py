@@ -966,7 +966,7 @@ if single_language_mode:
             )
             normal_limit = int(dutch_max)
         st.caption(
-            "Punctuation is removed before measuring. The sole language is treated as the "
+            "Length checks use the cleaned lyrics. The sole language is treated as the "
             "first output side and therefore uses the existing stricter 80% limit, even "
             "though no `|` is generated. Existing word-safe, grammatical-phrase protection, "
             "Chinese segmentation, balance, and minimum-fragment rules remain active. Current "
@@ -1535,8 +1535,8 @@ with st.expander("Splitting rules", expanded=False):
         key=TITLE_SEPARATOR_KEY,
     )
     st.caption(
-        "Punctuation is removed before measuring. The TXT keeps commas inside Latin-script "
-        "lyric lines. Long Chinese uses the nearest balanced local "
+        "Length checks use the cleaned lyrics. The TXT keeps apostrophes attached to words "
+        "and commas inside Latin-script lyric lines. Long Chinese uses the nearest balanced local "
         "word-segmentation boundary; long Dutch uses the nearest whitespace boundary. Each "
         "language receives at most one `//` per output row. The final language before `|` uses "
         "80% of its normal limit, so it splits slightly sooner; the language after `|` keeps its "

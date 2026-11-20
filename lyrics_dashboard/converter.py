@@ -188,6 +188,7 @@ def _convert_single_language(
                 minimum_fragment_length=MINIMUM_FIRST_SIDE_FRAGMENT_LENGTH,
                 minimum_fragment_ratio=FIRST_SIDE_MINIMUM_FRAGMENT_RATIO,
                 preserve_inner_commas=language == "nl",
+                preserve_apostrophes=language == "nl",
             )
             if result.used_character_fallback and warnings is not None:
                 warning = (
@@ -264,6 +265,7 @@ def convert_lyrics(
                     FIRST_SIDE_MINIMUM_FRAGMENT_RATIO if dutch_first else 0.0
                 ),
                 preserve_inner_commas=True,
+                preserve_apostrophes=True,
             )
             if chinese_result.used_character_fallback and warnings is not None:
                 warning = (

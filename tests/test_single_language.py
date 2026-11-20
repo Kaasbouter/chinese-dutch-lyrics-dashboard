@@ -269,7 +269,7 @@ def test_single_language_preserves_cleaning_and_utf8_export_identity() -> None:
     assert "|" not in preview
 
 
-def test_dutch_txt_preserves_commas_inside_each_lyric_line() -> None:
+def test_dutch_txt_preserves_commas_and_elision_apostrophes() -> None:
     source = (
         "[Title]\nO kind, ons geboren\n\n"
         "Verse 6\n"
@@ -284,7 +284,7 @@ def test_dutch_txt_preserves_commas_inside_each_lyric_line() -> None:
         "[Title]\nO kind ons geboren\n\n"
         "[Verse 6]\n"
         "O kind, ons geboren, liggend in de kribbe\n"
-        "neem onze liefd in genade aan\n"
+        "neem onze liefd' in genade aan\n"
         "U, die ons liefhebt, U behoort ons harte\n"
     ).encode("utf-8")
 
@@ -323,9 +323,31 @@ def test_english_txt_preserves_commas_inside_each_lyric_line(lyric: str, expecte
     assert output == f"[Verse 1]\n{expected}\n"
 
 
+@pytest.mark.parametrize(
+    ("lyric", "expected"),
+    (
+        ("  Ik zie   't licht!  ", "Ik zie 't licht"),
+        ("’t Licht blijft eeuwig!", "’t Licht blijft eeuwig"),
+        ("Don't   stop believing,", "Don't stop believing"),
+        ("We’re  here,   so don‘t fear!", "We’re here, so don‘t fear"),
+        ("The singers' voices rise!", "The singers' voices rise"),
+        ("We sing 'we're here'!", "We sing we're here"),
+        ("We sing ‘we’re here’!", "We sing we’re here"),
+        ("We sing ‘we’re here,’ softly.", "We sing we’re here, softly"),
+    ),
+)
+def test_latin_txt_preserves_word_apostrophes(lyric: str, expected: str) -> None:
+    output = _convert(
+        f"Verse 1\n{lyric}\n",
+        ConversionSettings(dutch_max_length=80),
+    )
+
+    assert output == f"[Verse 1]\n{expected}\n"
+
+
 def test_single_chinese_punctuation_removal_keeps_all_lyric_characters() -> None:
     source_line = (
-        "\u7962\uff0c\u4fe1\u3002\u5be6\uff01\u4f55\uff1f"
+        "\u7962\uff0c\u4fe1'\u3002\u5be6\uff01\u4f55\u2019\uff1f"
         "\u5ee3\uff1b\u5927\uff1a\u611b\u6069"
     )
     cleaned = "\u7962\u4fe1\u5be6\u4f55\u5ee3\u5927\u611b\u6069"

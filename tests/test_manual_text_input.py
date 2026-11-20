@@ -395,7 +395,7 @@ def test_paste_source_is_separate_from_update_and_saved_txt(monkeypatch) -> None
     assert downloads[-1] == encode_utf8_txt(manual_output)
 
 
-def test_english_txt_automatically_preserves_commas_inside_lyrics(monkeypatch) -> None:
+def test_english_txt_automatically_preserves_commas_and_apostrophes(monkeypatch) -> None:
     downloads: list[bytes] = []
     real_download_button = st.download_button
 
@@ -404,8 +404,8 @@ def test_english_txt_automatically_preserves_commas_inside_lyrics(monkeypatch) -
         return real_download_button(*args, **kwargs)
 
     monkeypatch.setattr(st, "download_button", record_download)
-    app = _process(_start_paste_mode(), "Verse 1\nO child, born to us,\n")
-    expected = "[Verse 1]\nO child, born to us\n"
+    app = _process(_start_paste_mode(), "Verse 1\nDon't fear, we’re here,\n")
+    expected = "[Verse 1]\nDon't fear, we’re here\n"
 
     assert "custom_latin_lyric_language" not in app.session_state
     assert _final_area(app).value == expected

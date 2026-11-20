@@ -1,4 +1,5 @@
 # Pinned versions for Streamlit Community Cloud and local development.
+# Changes to this file trigger a fresh build on Streamlit Community Cloud.
 streamlit==1.56.0
 streamlit-sortables==0.3.1
 jieba==0.42.1

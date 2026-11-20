@@ -8,6 +8,13 @@ from typing import Literal
 
 LanguageCode = Literal["zh", "nl"]
 
+_APOSTROPHE_RE = re.compile("['‘’]")
+_WORD_RE = re.compile(r"[^\W_]+")
+_LEADING_ELISIONS = frozenset(
+    "s t k n m r em cause til till round bout fore gainst midst neath "
+    "tis twas twere twill twould tween ere cept nuff".split()
+)
+
 _SCHEME_URL_RE = re.compile(r"^(?:https?|ftp)://[^\s<>]+$", re.IGNORECASE)
 _WWW_URL_RE = re.compile(r"^www\.[^\s<>]+$", re.IGNORECASE)
 _DOMAIN_URL_RE = re.compile(
@@ -165,6 +172,47 @@ def _is_punctuation(character: str) -> bool:
     return unicodedata.category(character).startswith("P")
 
 
+def _apostrophe_indices(text: str) -> frozenset[int]:
+    """Find apostrophes attached to words, excluding paired single quotes."""
+    if not _APOSTROPHE_RE.search(text):
+        return frozenset()
+
+    indices: set[int] = set()
+    for line_match in re.finditer(r"[^\n]+", text):
+        line = line_match.group()
+        offset = line_match.start()
+        opening_quote: int | None = None
+        for mark_match in _APOSTROPHE_RE.finditer(line):
+            index = mark_match.start()
+            mark = mark_match.group()
+            previous = line[index - 1] if index else ""
+            after_word = bool(previous) and (
+                previous.isalnum() or unicodedata.category(previous).startswith("M")
+            )
+            following_word = _WORD_RE.match(line, index + 1)
+            if following_word:
+                indices.add(offset + index)
+                if (
+                    not after_word
+                    and mark != "’"
+                    and following_word.group().casefold() not in _LEADING_ELISIONS
+                ):
+                    opening_quote = offset + index
+                continue
+            if (
+                opening_quote is not None
+                and mark != "‘"
+                and previous
+                and (after_word or _is_punctuation(previous))
+                and line[index + 1:index + 2] not in ("'", "’")
+            ):
+                indices.discard(opening_quote)
+                opening_quote = None
+            elif after_word:
+                indices.add(offset + index)
+    return frozenset(indices)
+
+
 def _interior_comma_indices(text: str) -> frozenset[int]:
     """Find commas with lyric content on both sides of the same source line."""
     if "," not in text:
@@ -298,6 +346,7 @@ def clean_content_result(
     language: LanguageCode,
     *,
     preserve_inner_commas: bool = False,
+    preserve_apostrophes: bool = False,
 ) -> CleanContentResult:
     """Clean content while tracking source whitespace and relevant comma positions.
 
@@ -311,16 +360,24 @@ def clean_content_result(
         _interior_comma_indices(text) if language == "nl" and preserve_inner_commas
         else frozenset()
     )
+    apostrophe_indices = (
+        _apostrophe_indices(text) if language == "nl" and preserve_apostrophes
+        else frozenset()
+    )
     index = 0
     while index < len(text):
         character = text[index]
-        if not _is_punctuation(character):
+        if index in apostrophe_indices or not _is_punctuation(character):
             cleaned.append((character, character.isspace()))
             index += 1
             continue
 
         punctuation_end = index + 1
-        while punctuation_end < len(text) and _is_punctuation(text[punctuation_end]):
+        while (
+            punctuation_end < len(text)
+            and punctuation_end not in apostrophe_indices
+            and _is_punctuation(text[punctuation_end])
+        ):
             punctuation_end += 1
 
         if language == "zh" and any(

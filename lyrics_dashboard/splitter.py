@@ -1160,7 +1160,7 @@ def _render_latin_split(
         text = "".join(parts)
     if boundary is None:
         return SplitResult(text)
-    # The selected boundary is in the punctuation-free text.
+    # The selected boundary is in the cleaned text before commas are restored.
     boundary += sum(offset <= boundary for offset in comma_offsets)
     left, right = _split_parts(text, boundary) or (text, "")
     return SplitResult(f"{left}//{right}" if right else left)
@@ -1174,6 +1174,7 @@ def split_lyric_result(
     minimum_fragment_length: int = 1,
     minimum_fragment_ratio: float = 0.0,
     preserve_inner_commas: bool = False,
+    preserve_apostrophes: bool = False,
 ) -> SplitResult:
     """Clean lyric content and add at most one balanced ``//``."""
     if max_length < MINIMUM_SPLIT_LIMIT:
@@ -1187,6 +1188,7 @@ def split_lyric_result(
         text,
         language,
         preserve_inner_commas=preserve_inner_commas,
+        preserve_apostrophes=preserve_apostrophes,
     )
     cleaned = cleaning.text
     # Keep the existing split trigger's single-space allowance separate from

@@ -110,8 +110,8 @@ def test_punctuation_cleanup_retains_only_internal_dutch_lyric_commas() -> None:
             "Wij zingen, voor de Heer wij danken U, geliefde Vader",
         ),
         (
-            "We sing, for the Lord,\nwe thank you, beloved Father,",
-            "We sing, for the Lord we thank you, beloved Father",
+            "We'll sing, for the Lord,\nwe’re yours, beloved Father,",
+            "We'll sing, for the Lord we’re yours, beloved Father",
         ),
     ),
     ids=["dutch", "english"],
